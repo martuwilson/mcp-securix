@@ -13,7 +13,14 @@
     "type": "git",
     "url": "git+https://github.com/martuwilson/mcp-securix.git"
   },
-  "keywords": ["mcp", "security", "dns", "ssl", "http", "audit"],
+  "keywords": [
+    "mcp",
+    "security",
+    "dns",
+    "ssl",
+    "http",
+    "audit"
+  ],
   "author": "martuwilson",
   "license": "ISC",
   "bugs": {
@@ -21,7 +28,8 @@
   },
   "homepage": "https://github.com/martuwilson/mcp-securix#readme",
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.29.0"
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/node": "^25.9.3",
