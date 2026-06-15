@@ -1,7 +1,8 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { dnsLookup } from "./tools/dns/index.js";
+import { dnsLookup } from "./tools/dns/lookup.js";
+import { spfDmarcCheck } from "./tools/dns/spf-dmarc.js";
 
 const server = new McpServer({
   name: "mcp-securix",
@@ -16,6 +17,25 @@ server.tool(
   },
   async ({ domain }) => {
     const result = await dnsLookup(domain);
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify(result, null, 2),
+        },
+      ],
+    };
+  }
+);
+
+server.tool(
+  "spf_dmarc_check",
+  "Verifica la configuración de SPF y DMARC de un dominio. Evalúa si el dominio está protegido contra email spoofing y phishing.",
+  {
+    domain: z.string().describe("El dominio a auditar, por ejemplo 'example.com'"),
+  },
+  async ({ domain }) => {
+    const result = await spfDmarcCheck(domain);
     return {
       content: [
         {
