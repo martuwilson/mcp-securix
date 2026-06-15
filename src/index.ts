@@ -5,6 +5,7 @@ import { dnsLookup } from "./tools/dns/lookup.js";
 import { spfDmarcCheck } from "./tools/dns/spf-dmarc.js";
 import { sslCheck } from "./tools/ssl/check.js";
 import { headersCheck } from "./tools/http/header.js";
+import { securityScore } from "./tools/score/engine.js";
 
 const server = new McpServer({
   name: "mcp-securix",
@@ -80,6 +81,26 @@ server.tool(
   },
   async ({ domain }) => {
     const result = await headersCheck(domain);
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify(result, null, 2),
+        },
+      ],
+    };
+  }
+);
+
+// Score engine Tool
+server.tool(
+  "security_score",
+  "Realiza una auditoría de seguridad completa de un dominio: DNS, SSL, SPF, DMARC y HTTP headers. Devuelve un score 0-100, nivel de riesgo, desglose por categoría y hallazgos priorizados por severidad.",
+  {
+    domain: z.string().describe("El dominio a auditar, sin https://, por ejemplo 'example.com'"),
+  },
+  async ({ domain }) => {
+    const result = await securityScore(domain);
     return {
       content: [
         {
