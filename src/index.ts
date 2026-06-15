@@ -3,12 +3,14 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { dnsLookup } from "./tools/dns/lookup.js";
 import { spfDmarcCheck } from "./tools/dns/spf-dmarc.js";
+import { sslCheck } from "./tools/ssl/check.js";
 
 const server = new McpServer({
   name: "mcp-securix",
   version: "1.0.0",
 });
 
+//DNS Lookup Tool
 server.tool(
   "dns_lookup",
   "Resuelve los registros DNS (A, AAAA, MX, TXT, NS, CNAME) de un dominio. Útil para reconocimiento y auditoría de infraestructura.",
@@ -28,6 +30,7 @@ server.tool(
   }
 );
 
+//SPF & DMARC Check Tool
 server.tool(
   "spf_dmarc_check",
   "Verifica la configuración de SPF y DMARC de un dominio. Evalúa si el dominio está protegido contra email spoofing y phishing.",
@@ -36,6 +39,26 @@ server.tool(
   },
   async ({ domain }) => {
     const result = await spfDmarcCheck(domain);
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify(result, null, 2),
+        },
+      ],
+    };
+  }
+);
+
+//SSL Certificate Check Tool
+server.tool(
+  "ssl_check",
+  "Verifica el certificado SSL/TLS de un dominio: validez, fecha de expiración, emisor, protocolo y dominios cubiertos. Detecta certificados expirados, próximos a vencer, o con protocolos obsoletos.",
+  {
+    domain: z.string().describe("El dominio a verificar, sin https://, por ejemplo 'example.com'"),
+  },
+  async ({ domain }) => {
+    const result = await sslCheck(domain);
     return {
       content: [
         {
