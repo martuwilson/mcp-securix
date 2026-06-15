@@ -4,6 +4,7 @@ import { z } from "zod";
 import { dnsLookup } from "./tools/dns/lookup.js";
 import { spfDmarcCheck } from "./tools/dns/spf-dmarc.js";
 import { sslCheck } from "./tools/ssl/check.js";
+import { headersCheck } from "./tools/http/header.js";
 
 const server = new McpServer({
   name: "mcp-securix",
@@ -59,6 +60,26 @@ server.tool(
   },
   async ({ domain }) => {
     const result = await sslCheck(domain);
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify(result, null, 2),
+        },
+      ],
+    };
+  }
+);
+
+//Headers Check Tool
+server.tool(
+  "headers_check",
+  "Analiza los headers de seguridad HTTP de un dominio: HSTS, CSP, X-Frame-Options, X-Content-Type-Options, Referrer-Policy y Permissions-Policy. Detecta headers ausentes o mal configurados.",
+  {
+    domain: z.string().describe("El dominio a analizar, sin https://, por ejemplo 'example.com'"),
+  },
+  async ({ domain }) => {
+    const result = await headersCheck(domain);
     return {
       content: [
         {
