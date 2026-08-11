@@ -8,6 +8,7 @@ import { sslCheck } from "./tools/ssl/check.js";
 import { headersCheck } from "./tools/http/header.js";
 import { corsCheck } from "./tools/http/cors.js";
 import { securityScore } from "./tools/score/engine.js";
+import { renderReport } from "./tools/report/html.js";
 
 const server = new McpServer({
   name: "mcp-securix",
@@ -154,6 +155,29 @@ server.tool(
   }
 );
 
+// Security Report Tool — devuelve el reporte YA renderizado como HTML.
+// El diseño (score, gauge, barras) lo controla el server, así el visual es
+// determinístico y no depende de que el modelo lo dibuje.
+server.tool(
+  "security_report",
+  "Audita un dominio y devuelve un reporte de seguridad completo ya renderizado como HTML (score visual, desglose por categoría, estado de controles y hallazgos priorizados). El HTML debe mostrarse tal cual como artifact, sin modificarlo.",
+  {
+    domain: z.string().describe("El dominio a auditar, sin https://, por ejemplo 'example.com'"),
+  },
+  async ({ domain }) => {
+    const result = await securityScore(domain);
+    const html = renderReport(result);
+    return {
+      content: [
+        {
+          type: "text",
+          text: html,
+        },
+      ],
+    };
+  }
+);
+
 // Prompt de reporte: da formato y tono consistentes al informe de auditoría,
 // independientemente de cómo lo pida el usuario.
 server.prompt(
@@ -169,22 +193,11 @@ server.prompt(
         content: {
           type: "text",
           text: [
-            `Auditá la seguridad del dominio ${domain} usando la tool security_score y presentá el resultado SIEMPRE como un artifact HTML visual (no como texto plano). El artifact es obligatorio, no opcional.`,
+            `Generá el reporte de seguridad del dominio ${domain} llamando a la tool security_report.`,
             "",
-            "El artifact HTML debe incluir, en este orden:",
+            "Esa tool devuelve el reporte YA renderizado como HTML (con el score, el gauge y las barras hechos por el servidor). Mostrá ese HTML TAL CUAL como un artifact de tipo HTML, sin rediseñarlo, sin cambiar colores ni estructura, y sin regenerarlo por tu cuenta.",
             "",
-            "1. **Encabezado**: nombre del dominio, fecha/hora (campo generatedAt) y, si el análisis siguió un redirect, la URL final evaluada (finalUrl de headers).",
-            "2. **Score principal DESTACADO**: el número score/100 grande dentro de un círculo/gauge SVG, coloreado según el riesgo (verde=low, amarillo=medium, naranja=high, rojo=critical). Al lado, un badge con el nivel de riesgo en mayúsculas.",
-            "3. **Desglose por categoría**: una barra de progreso por cada categoría del breakdown (SSL/TLS, SPF, DMARC, HTTP Headers) mostrando puntos/max, con la barra coloreada según qué tan completa está. Este bloque NUNCA debe faltar.",
-            "4. **Tarjetas de estado**: mini-cards para SSL, SPF, DMARC y DKIM con su veredicto y dato clave (emisor/expiración, calificador SPF, política DMARC, selectores DKIM).",
-            "5. **Hallazgos priorizados**: agrupados por severidad (critical → low → info), cada uno con su título, impacto y el paso de remediación (incluí el remediation.example exacto en un bloque de código cuando exista).",
-            "",
-            "Reglas de datos y tono:",
-            "- Usá EXCLUSIVAMENTE los datos del JSON que devuelve security_score. No inventes hallazgos ni valores.",
-            "- Directo y técnico, sin relleno ni alarmismo. Si algo depende de un tercero (ej. la plataforma de hosting), aclaralo.",
-            "- Si el score parece bajo por un solo hallazgo grande (ej. DMARC ausente), aclaralo con honestidad.",
-            "- Incluí una nota final: es un análisis de configuración externa, no un pentest de la aplicación.",
-            "- Diseño limpio y legible; que funcione en tema claro y oscuro.",
+            "Después del artifact, agregá 2-3 líneas de contexto en texto: cuál es el hallazgo más urgente y, si el score parece bajo por un solo problema grande (ej. DMARC ausente), aclaralo con honestidad. No repitas todo el contenido del reporte en texto.",
           ].join("\n"),
         },
       },

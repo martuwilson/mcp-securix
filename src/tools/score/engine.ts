@@ -1,9 +1,9 @@
-import { dnsLookup } from "../dns/lookup.js";
+import { dnsLookup, type DnsLookupResult } from "../dns/lookup.js";
 import { spfDmarcCheck, type SpfDmarcResult } from "../dns/spf-dmarc.js";
-import { dkimCheck } from "../dns/dkim.js";
+import { dkimCheck, type DkimResult } from "../dns/dkim.js";
 import { sslCheck, type SslResult } from "../ssl/check.js";
 import { headersCheck, type HeadersResult } from "../http/header.js";
-import { corsCheck } from "../http/cors.js";
+import { corsCheck, type CorsResult } from "../http/cors.js";
 import {
   type Finding,
   type Severity,
@@ -37,6 +37,15 @@ export interface SecurityScoreResult {
   findings: Finding[];
   /** Conteo de hallazgos por severidad. */
   summary: Record<Severity, number>;
+  /** Resultados crudos de cada check, para render de reportes detallados. */
+  details: {
+    dns: DnsLookupResult;
+    spfDmarc: SpfDmarcResult;
+    dkim: DkimResult;
+    ssl: SslResult;
+    headers: HeadersResult;
+    cors: CorsResult;
+  };
   generatedAt: string;
 }
 
@@ -453,6 +462,7 @@ export async function securityScore(domain: string): Promise<SecurityScoreResult
     penalties: { cors: corsPenalty },
     findings: sortFindings(findings),
     summary: countBySeverity(findings),
+    details: { dns, spfDmarc, dkim, ssl, headers, cors },
     generatedAt: new Date().toISOString(),
   };
 }
