@@ -1,4 +1,4 @@
-import * as https from "node:https";
+import { httpGet } from "./fetch.js";
 import type { Finding } from "../findings.js";
 
 // Origen claramente ajeno que usamos como "sonda". Si el servidor lo refleja
@@ -118,67 +118,42 @@ function evaluate(
 export async function corsCheck(domain: string): Promise<CorsResult> {
   const url = `https://${domain}`;
 
-  return new Promise((resolve) => {
-    const req = https.request(
+  let res;
+  try {
+    // Seguimos redirects mandando el Origin de prueba: la config CORS relevante
+    // está en el destino final (ej. apex → www), no en el 301 intermedio.
+    res = await httpGet(url, {
+      timeoutMs: 8000,
+      maxRedirects: 5,
+      headers: { Origin: PROBE_ORIGIN },
+    });
+  } catch (err) {
+    return {
+      domain,
       url,
-      {
-        method: "GET",
-        timeout: 8000,
-        headers: {
-          "User-Agent": "Mozilla/5.0 (compatible; mcp-securix/1.0)",
-          Origin: PROBE_ORIGIN,
-        },
-      },
-      (res) => {
-        const acao = res.headers["access-control-allow-origin"] as
-          | string
-          | undefined;
-        const acac = res.headers["access-control-allow-credentials"] as
-          | string
-          | undefined;
+      probeOrigin: PROBE_ORIGIN,
+      verdict: "error",
+      detail: `Error de conexión: ${(err as Error).message}`,
+      findings: [],
+    };
+  }
 
-        // No necesitamos el body.
-        res.resume();
+  const acao = res.headers["access-control-allow-origin"] as string | undefined;
+  const acac = res.headers["access-control-allow-credentials"] as
+    | string
+    | undefined;
 
-        const { verdict, detail, findings } = evaluate(domain, acao, acac);
+  const { verdict, detail, findings } = evaluate(domain, acao, acac);
 
-        resolve({
-          domain,
-          url,
-          statusCode: res.statusCode,
-          probeOrigin: PROBE_ORIGIN,
-          accessControlAllowOrigin: acao,
-          accessControlAllowCredentials: acac,
-          verdict,
-          detail,
-          findings,
-        });
-      }
-    );
-
-    req.on("timeout", () => {
-      req.destroy();
-      resolve({
-        domain,
-        url,
-        probeOrigin: PROBE_ORIGIN,
-        verdict: "error",
-        detail: "Timeout al conectar al servidor.",
-        findings: [],
-      });
-    });
-
-    req.on("error", (err) => {
-      resolve({
-        domain,
-        url,
-        probeOrigin: PROBE_ORIGIN,
-        verdict: "error",
-        detail: `Error de conexión: ${err.message}`,
-        findings: [],
-      });
-    });
-
-    req.end();
-  });
+  return {
+    domain,
+    url,
+    statusCode: res.statusCode,
+    probeOrigin: PROBE_ORIGIN,
+    accessControlAllowOrigin: acao,
+    accessControlAllowCredentials: acac,
+    verdict,
+    detail,
+    findings,
+  };
 }

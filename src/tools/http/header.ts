@@ -1,9 +1,12 @@
-import * as https from "node:https";
-import * as http from "node:http";
+import { httpGet } from "./fetch.js";
 
 export interface HeadersResult {
   domain: string;
   url: string;
+  /** URL final evaluada tras seguir redirects (ej. apex → www). */
+  finalUrl?: string;
+  /** Redirects seguidos antes de la respuesta final. */
+  redirectChain?: string[];
   statusCode?: number;
   headers: {
     found: string[];
@@ -94,89 +97,76 @@ function evaluateHeader(name: string, value: string | undefined): {
 export async function headersCheck(domain: string): Promise<HeadersResult> {
   const url = `https://${domain}`;
 
-  return new Promise((resolve) => {
-    const req = https.request(
+  let res;
+  try {
+    // Seguimos redirects: los headers de seguridad viven en el destino final
+    // (ej. apex → www), no en el 301 intermedio.
+    res = await httpGet(url, { timeoutMs: 8000, maxRedirects: 5 });
+  } catch (err) {
+    return {
+      domain,
       url,
-      {
-        method: "GET",
-        timeout: 8000,
-        headers: { "User-Agent": "Mozilla/5.0 (compatible; mcp-securix/1.0)" },
-      },
-      (res) => {
-        const responseHeaders = res.headers;
-        const checks: HeadersResult["checks"] = {};
-        const found: string[] = [];
-        const missing: string[] = [];
+      headers: { found: [], missing: Object.keys(SECURITY_HEADERS) },
+      checks: {},
+      verdict: "error",
+      detail: `Error de conexión: ${(err as Error).message}`,
+    };
+  }
 
-        for (const [headerName] of Object.entries(SECURITY_HEADERS)) {
-          const value = responseHeaders[headerName] as string | undefined;
-          const evaluation = evaluateHeader(headerName, value);
-          checks[headerName] = {
-            present: !!value,
-            value,
-            ...evaluation,
-          };
-          if (value) {
-            found.push(headerName);
-          } else {
-            missing.push(headerName);
-          }
-        }
+  const responseHeaders = res.headers;
+  const checks: HeadersResult["checks"] = {};
+  const found: string[] = [];
+  const missing: string[] = [];
 
-        // Verdict general basado en ausencias y debilidades
-        const missingCount = missing.length;
-        const criticalMissing = ["strict-transport-security", "content-security-policy"];
-        const hasCriticalMissing = criticalMissing.some(h => missing.includes(h));
+  for (const [headerName] of Object.entries(SECURITY_HEADERS)) {
+    const value = responseHeaders[headerName] as string | undefined;
+    const evaluation = evaluateHeader(headerName, value);
+    checks[headerName] = {
+      present: !!value,
+      value,
+      ...evaluation,
+    };
+    if (value) {
+      found.push(headerName);
+    } else {
+      missing.push(headerName);
+    }
+  }
 
-        let verdict: HeadersResult["verdict"];
-        let detail: string;
+  // Verdict general basado en ausencias y debilidades
+  const missingCount = missing.length;
+  const criticalMissing = ["strict-transport-security", "content-security-policy"];
+  const hasCriticalMissing = criticalMissing.some((h) => missing.includes(h));
 
-        if (missingCount >= 4 || hasCriticalMissing) {
-          verdict = "critical";
-          detail = `${missingCount} de ${Object.keys(SECURITY_HEADERS).length} headers de seguridad ausentes. Headers críticos faltantes: ${criticalMissing.filter(h => missing.includes(h)).join(", ")}.`;
-        } else if (missingCount >= 2) {
-          verdict = "weak";
-          detail = `${missingCount} headers de seguridad ausentes. Configuración incompleta.`;
-        } else {
-          verdict = "strong";
-          detail = `Headers de seguridad correctamente configurados. Solo ${missingCount} ausente(s).`;
-        }
+  let verdict: HeadersResult["verdict"];
+  let detail: string;
 
-        resolve({
-          domain,
-          url,
-          statusCode: res.statusCode,
-          headers: { found, missing },
-          checks,
-          verdict,
-          detail,
-        });
-      }
-    );
+  if (missingCount >= 4 || hasCriticalMissing) {
+    verdict = "critical";
+    detail = `${missingCount} de ${Object.keys(SECURITY_HEADERS).length} headers de seguridad ausentes. Headers críticos faltantes: ${criticalMissing.filter((h) => missing.includes(h)).join(", ")}.`;
+  } else if (missingCount >= 2) {
+    verdict = "weak";
+    detail = `${missingCount} headers de seguridad ausentes. Configuración incompleta.`;
+  } else {
+    verdict = "strong";
+    detail = `Headers de seguridad correctamente configurados. Solo ${missingCount} ausente(s).`;
+  }
 
-    req.on("timeout", () => {
-      req.destroy();
-      resolve({
-        domain,
-        url,
-        headers: { found: [], missing: Object.keys(SECURITY_HEADERS) },
-        checks: {},
-        verdict: "error",
-        detail: "Timeout al conectar al servidor.",
-      });
-    });
+  // Si hubo redirect, dejamos constancia en el detail para que el reporte no
+  // atribuya erróneamente los headers al apex.
+  if (res.redirectChain.length > 0) {
+    detail += ` (evaluado en ${res.finalUrl} tras ${res.redirectChain.length} redirect(s)).`;
+  }
 
-    req.on("error", (err) => {
-      resolve({
-        domain,
-        url,
-        headers: { found: [], missing: Object.keys(SECURITY_HEADERS) },
-        checks: {},
-        verdict: "error",
-        detail: `Error de conexión: ${err.message}`,
-      });
-    });
-
-    req.end();
-  });
+  return {
+    domain,
+    url,
+    finalUrl: res.finalUrl,
+    redirectChain: res.redirectChain.length > 0 ? res.redirectChain : undefined,
+    statusCode: res.statusCode,
+    headers: { found, missing },
+    checks,
+    verdict,
+    detail,
+  };
 }
