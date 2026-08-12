@@ -146,7 +146,11 @@ export function scoreSsl(ssl: SslResult): { points: number; detail: string; find
 }
 
 // --- SPF (20 pts) ---
-export function scoreSpf(spf: SpfDmarcResult["spf"]): { points: number; detail: string; findings: Finding[] } {
+// hasMx escala la severidad: la falta de SPF pesa más si el dominio maneja correo.
+export function scoreSpf(
+  spf: SpfDmarcResult["spf"],
+  hasMx = true
+): { points: number; detail: string; findings: Finding[] } {
   const findings: Finding[] = [];
 
   if (spf.verdict === "strong") {
@@ -173,7 +177,7 @@ export function scoreSpf(spf: SpfDmarcResult["spf"]): { points: number; detail: 
     findings.push({
       id: "spf-missing",
       category: "spf",
-      severity: "high",
+      severity: hasMx ? "high" : "medium",
       title: "Sin registro SPF",
       impact:
         "Sin SPF, los servidores receptores no pueden verificar qué IPs pueden enviar como tu dominio, facilitando el spoofing.",
@@ -219,7 +223,14 @@ export function scoreSpf(spf: SpfDmarcResult["spf"]): { points: number; detail: 
 }
 
 // --- DMARC (25 pts) ---
-export function scoreDmarc(dmarc: SpfDmarcResult["dmarc"], domain: string): { points: number; detail: string; findings: Finding[] } {
+// DMARC ausente es el mayor golpe al score (25 pts). Su severidad escala con
+// hasMx para que el badge sea coherente con el peso: crítico si el dominio
+// maneja correo, high si no.
+export function scoreDmarc(
+  dmarc: SpfDmarcResult["dmarc"],
+  domain: string,
+  hasMx = true
+): { points: number; detail: string; findings: Finding[] } {
   const findings: Finding[] = [];
 
   if (dmarc.verdict === "strong") {
@@ -230,7 +241,7 @@ export function scoreDmarc(dmarc: SpfDmarcResult["dmarc"], domain: string): { po
     findings.push({
       id: "dmarc-missing",
       category: "dmarc",
-      severity: "high",
+      severity: hasMx ? "critical" : "high",
       title: "Sin registro DMARC",
       impact:
         "Sin DMARC, aunque falle SPF/DKIM los receptores no tienen instrucción sobre qué hacer, y no recibís reportes de quién envía como tu dominio. Es la puerta abierta al phishing con tu marca.",
@@ -413,8 +424,8 @@ export async function securityScore(domain: string): Promise<SecurityScoreResult
   const findings: Finding[] = [];
 
   const sslScore = scoreSsl(ssl);
-  const spfScore = scoreSpf(spfDmarc.spf);
-  const dmarcScore = scoreDmarc(spfDmarc.dmarc, domain);
+  const spfScore = scoreSpf(spfDmarc.spf, hasMx);
+  const dmarcScore = scoreDmarc(spfDmarc.dmarc, domain, hasMx);
   const headersScore = scoreHeaders(headers);
 
   findings.push(

@@ -56,6 +56,24 @@ test("scoreDmarc: missing da 0 y remediation con ejemplo del dominio", () => {
   assert.ok(r.findings[0]?.remediation?.example?.includes("midominio.com"));
 });
 
+test("scoreDmarc: missing es critical si el dominio tiene MX", () => {
+  const dmarc: DmarcResult = { exists: false, verdict: "missing", detail: "" };
+  const r = scoreDmarc(dmarc, "x.com", true);
+  assert.equal(r.findings[0]?.severity, "critical");
+});
+
+test("scoreDmarc: missing es high si el dominio NO tiene MX", () => {
+  const dmarc: DmarcResult = { exists: false, verdict: "missing", detail: "" };
+  const r = scoreDmarc(dmarc, "x.com", false);
+  assert.equal(r.findings[0]?.severity, "high");
+});
+
+test("scoreSpf: missing baja a medium si el dominio NO tiene MX", () => {
+  const spf: SpfResult = { exists: false, verdict: "missing", detail: "" };
+  const r = scoreSpf(spf, false);
+  assert.equal(r.findings[0]?.severity, "medium");
+});
+
 function headersWith(
   checks: HeadersResult["checks"],
   found: string[]

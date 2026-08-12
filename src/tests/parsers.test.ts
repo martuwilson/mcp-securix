@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { classifySpf, classifyDmarc } from "../tools/dns/spf-dmarc.js";
+import { isDkimRecord } from "../tools/dns/dkim.js";
 import { evaluateHeader } from "../tools/http/header.js";
 import { evaluateCors } from "../tools/http/cors.js";
 import { parseCookie } from "../tools/http/web-extras.js";
@@ -45,6 +46,22 @@ test("classifyDmarc: p=none es weak", () => {
   const r = classifyDmarc("v=DMARC1; p=none");
   assert.equal(r.verdict, "weak");
   assert.equal(r.policy, "none");
+});
+
+test("isDkimRecord: registro DKIM real (v=DKIM1 + clave) es true", () => {
+  assert.equal(isDkimRecord("v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMII"), true);
+});
+
+test("isDkimRecord: clave larga sin v=DKIM1 es true", () => {
+  assert.equal(isDkimRecord("k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA"), true);
+});
+
+test("isDkimRecord: p=none (DMARC-like) NO es DKIM", () => {
+  assert.equal(isDkimRecord("v=DMARC1; p=none"), false);
+});
+
+test("isDkimRecord: texto arbitrario no es DKIM", () => {
+  assert.equal(isDkimRecord("google-site-verification=abc123"), false);
 });
 
 test("evaluateHeader: HSTS con max-age largo es strong", () => {

@@ -44,9 +44,12 @@ export interface DkimResult {
   findings: Finding[];
 }
 
-function isDkimRecord(txt: string): boolean {
-  // Un registro DKIM válido incluye v=DKIM1 y/o una clave pública p=.
-  return /v=DKIM1/i.test(txt) || /(^|;)\s*p=/.test(txt);
+export function isDkimRecord(txt: string): boolean {
+  // Un registro DKIM válido declara v=DKIM1, o al menos una clave pública real
+  // en p= (base64 largo). Exigir ≥20 chars de base64 evita falsos positivos con
+  // otros TXT que casualmente tengan un p= corto (ej. 'p=none' de DMARC).
+  if (/v=DKIM1/i.test(txt)) return true;
+  return /(^|;)\s*p=[A-Za-z0-9+/]{20,}/.test(txt);
 }
 
 async function probeSelector(
