@@ -9,12 +9,18 @@ export interface HttpGetResult {
   finalUrl: string;
   /** Cadena de redirects seguidos (URLs intermedias), vacía si no hubo. */
   redirectChain: string[];
+  /** Cuerpo de la respuesta final, solo si se pidió con includeBody. */
+  body?: string;
 }
 
 export interface HttpGetOptions {
   headers?: Record<string, string>;
   timeoutMs?: number;
   maxRedirects?: number;
+  /** Si true, lee y devuelve el cuerpo de la respuesta final. */
+  includeBody?: boolean;
+  /** Corta la lectura del body a este máximo de bytes (default 256 KB). */
+  maxBodyBytes?: number;
 }
 
 const DEFAULT_UA = "Mozilla/5.0 (compatible; mcp-securix/1.0)";
@@ -30,6 +36,8 @@ export function httpGet(
 ): Promise<HttpGetResult> {
   const timeoutMs = opts.timeoutMs ?? 8000;
   const maxRedirects = opts.maxRedirects ?? 5;
+  const includeBody = opts.includeBody ?? false;
+  const maxBodyBytes = opts.maxBodyBytes ?? 256 * 1024;
   const baseHeaders = { "User-Agent": DEFAULT_UA, ...(opts.headers ?? {}) };
 
   return new Promise((resolve, reject) => {
@@ -69,12 +77,43 @@ export function httpGet(
           }
 
           // Respuesta final (o se agotaron los redirects).
-          res.resume();
-          resolve({
-            statusCode: status,
-            headers: res.headers,
-            finalUrl: currentUrl,
-            redirectChain,
+          if (!includeBody) {
+            res.resume();
+            resolve({
+              statusCode: status,
+              headers: res.headers,
+              finalUrl: currentUrl,
+              redirectChain,
+            });
+            return;
+          }
+
+          // Leemos el body hasta el límite y cortamos si se excede.
+          let body = "";
+          let bytes = 0;
+          res.setEncoding("utf8");
+          res.on("data", (chunk: string) => {
+            bytes += Buffer.byteLength(chunk);
+            if (bytes <= maxBodyBytes) body += chunk;
+            else res.destroy();
+          });
+          res.on("end", () => {
+            resolve({
+              statusCode: status,
+              headers: res.headers,
+              finalUrl: currentUrl,
+              redirectChain,
+              body,
+            });
+          });
+          res.on("close", () => {
+            resolve({
+              statusCode: status,
+              headers: res.headers,
+              finalUrl: currentUrl,
+              redirectChain,
+              body,
+            });
           });
         }
       );

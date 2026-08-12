@@ -103,7 +103,7 @@ function findingRow(f: Finding): string {
 
 export function renderReport(r: SecurityScoreResult): string {
   const riskColor = RISK_COLOR[r.risk];
-  const { ssl, spfDmarc, dkim, emailExtras, headers, cors, dns } = r.details;
+  const { ssl, spfDmarc, dkim, emailExtras, domainInfo, headers, cors, dns } = r.details;
 
   // Gauge circular del score.
   const radius = 54;
@@ -244,6 +244,14 @@ export function renderReport(r: SecurityScoreResult): string {
       <div><p style="font-size:11px;font-weight:600;color:#9ca3af;text-transform:uppercase;margin:0 0 6px;">Name Servers</p><p style="margin:0;line-height:1.9;">${nsRecords}</p></div>
       <div><p style="font-size:11px;font-weight:600;color:#9ca3af;text-transform:uppercase;margin:0 0 6px;">Correo (MX)</p><p style="margin:0;">${mxRecords}</p></div>
       <div><p style="font-size:11px;font-weight:600;color:#9ca3af;text-transform:uppercase;margin:0 0 6px;">IPv6 (AAAA)</p><p style="margin:0;color:#4b5563;">${esc(ipv6)}</p></div>
+    </div>`)}
+
+  ${section("Registro y certificación del dominio", `
+    <div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;padding:16px;display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;">
+      <div><p style="font-size:11px;font-weight:600;color:#9ca3af;text-transform:uppercase;margin:0 0 6px;">Registrador</p><p style="margin:0;color:#4b5563;">${esc(domainInfo.registration.registrar ?? "—")}</p></div>
+      <div><p style="font-size:11px;font-weight:600;color:#9ca3af;text-transform:uppercase;margin:0 0 6px;">Expira</p><p style="margin:0;color:#4b5563;">${domainInfo.registration.daysUntilExpiry != null ? esc(domainInfo.registration.daysUntilExpiry + " días") : "—"}</p></div>
+      <div><p style="font-size:11px;font-weight:600;color:#9ca3af;text-transform:uppercase;margin:0 0 6px;">DNSSEC</p><p style="margin:0;color:${domainInfo.registration.dnssec ? "#16a34a" : "#d97706"};font-weight:600;">${domainInfo.registration.dnssec == null ? "—" : domainInfo.registration.dnssec ? "Activo" : "No activo"}</p></div>
+      <div><p style="font-size:11px;font-weight:600;color:#9ca3af;text-transform:uppercase;margin:0 0 6px;">CAA</p><p style="margin:0;color:${domainInfo.caa.verdict === "present" ? "#16a34a" : "#d97706"};font-weight:600;">${domainInfo.caa.verdict === "present" ? esc(domainInfo.caa.issuers.join(", ") || "Presente") : "Ausente"}</p></div>
     </div>`)}
 
   ${section("Email avanzado", `

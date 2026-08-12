@@ -5,6 +5,7 @@ import { dnsLookup } from "./tools/dns/lookup.js";
 import { spfDmarcCheck } from "./tools/dns/spf-dmarc.js";
 import { dkimCheck } from "./tools/dns/dkim.js";
 import { emailExtrasCheck } from "./tools/dns/email-extras.js";
+import { domainInfoCheck } from "./tools/dns/domain-info.js";
 import { sslCheck } from "./tools/ssl/check.js";
 import { headersCheck } from "./tools/http/header.js";
 import { corsCheck } from "./tools/http/cors.js";
@@ -85,6 +86,26 @@ server.tool(
   },
   async ({ domain }) => {
     const result = await headersCheck(domain);
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify(result, null, 2),
+        },
+      ],
+    };
+  }
+);
+
+// Domain Info Tool (CAA, DNSSEC, expiración vía RDAP)
+server.tool(
+  "domain_info_check",
+  "Consulta gobernanza del dominio: registros CAA (qué CAs pueden emitir certificados), estado de DNSSEC y datos de registro (registrador y fecha de expiración) vía RDAP.",
+  {
+    domain: z.string().describe("El dominio a consultar, por ejemplo 'example.com'"),
+  },
+  async ({ domain }) => {
+    const result = await domainInfoCheck(domain);
     return {
       content: [
         {
