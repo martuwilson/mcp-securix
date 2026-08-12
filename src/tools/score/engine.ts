@@ -63,7 +63,7 @@ function calculateRisk(percentage: number): SecurityScoreResult["risk"] {
 }
 
 // --- SSL (25 pts) ---
-function scoreSsl(ssl: SslResult): { points: number; detail: string; findings: Finding[] } {
+export function scoreSsl(ssl: SslResult): { points: number; detail: string; findings: Finding[] } {
   const findings: Finding[] = [];
 
   if (ssl.verdict === "strong") {
@@ -146,7 +146,7 @@ function scoreSsl(ssl: SslResult): { points: number; detail: string; findings: F
 }
 
 // --- SPF (20 pts) ---
-function scoreSpf(spf: SpfDmarcResult["spf"]): { points: number; detail: string; findings: Finding[] } {
+export function scoreSpf(spf: SpfDmarcResult["spf"]): { points: number; detail: string; findings: Finding[] } {
   const findings: Finding[] = [];
 
   if (spf.verdict === "strong") {
@@ -219,7 +219,7 @@ function scoreSpf(spf: SpfDmarcResult["spf"]): { points: number; detail: string;
 }
 
 // --- DMARC (25 pts) ---
-function scoreDmarc(dmarc: SpfDmarcResult["dmarc"], domain: string): { points: number; detail: string; findings: Finding[] } {
+export function scoreDmarc(dmarc: SpfDmarcResult["dmarc"], domain: string): { points: number; detail: string; findings: Finding[] } {
   const findings: Finding[] = [];
 
   if (dmarc.verdict === "strong") {
@@ -333,7 +333,7 @@ function downgrade(sev: Severity): Severity {
   return order[Math.min(i + 1, order.length - 1)];
 }
 
-function scoreHeaders(headers: HeadersResult): { points: number; detail: string; findings: Finding[] } {
+export function scoreHeaders(headers: HeadersResult): { points: number; detail: string; findings: Finding[] } {
   const findings: Finding[] = [];
   let points = 0;
 

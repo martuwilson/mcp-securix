@@ -34,7 +34,7 @@ const SECURITY_HEADERS: Record<string, string> = {
   "permissions-policy": "Permissions-Policy",
 };
 
-function evaluateHeader(name: string, value: string | undefined): {
+export function evaluateHeader(name: string, value: string | undefined): {
   verdict: "strong" | "weak" | "missing";
   detail: string;
 } {

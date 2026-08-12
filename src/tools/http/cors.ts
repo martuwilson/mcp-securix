@@ -24,7 +24,7 @@ export interface CorsResult {
   findings: Finding[];
 }
 
-function evaluate(
+export function evaluateCors(
   domain: string,
   acao: string | undefined,
   acac: string | undefined
@@ -143,7 +143,7 @@ export async function corsCheck(domain: string): Promise<CorsResult> {
     | string
     | undefined;
 
-  const { verdict, detail, findings } = evaluate(domain, acao, acac);
+  const { verdict, detail, findings } = evaluateCors(domain, acao, acac);
 
   return {
     domain,

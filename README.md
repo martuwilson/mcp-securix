@@ -15,10 +15,14 @@ Cada herramienta devuelve JSON estructurado. Los hallazgos incluyen severidad, i
 | `dns_lookup` | Registros A, AAAA, MX, TXT, NS, CNAME | ✅ |
 | `spf_dmarc_check` | SPF y DMARC (anti-spoofing de correo) | ✅ |
 | `dkim_check` | DKIM probando selectores comunes de grandes proveedores | ✅ |
+| `email_extras_check` | MTA-STS, TLS-RPT y BIMI (email avanzado) | ✅ |
+| `domain_info_check` | CAA, DNSSEC y registro/expiración del dominio (vía RDAP) | ✅ |
 | `ssl_check` | Certificado: validez, expiración, emisor, protocolo TLS, SANs | ✅ |
-| `headers_check` | 6 headers de seguridad (HSTS, CSP, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy) | ✅ |
+| `headers_check` | 6 headers de seguridad (HSTS, CSP, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy); sigue redirects | ✅ |
 | `cors_check` | Misconfiguración CORS (reflejo de origen arbitrario con credenciales) | ✅ |
-| `security_score` | Auditoría completa: score 0-100, riesgo, desglose por categoría y hallazgos priorizados | ✅ |
+| `web_extras_check` | Redirect HTTP→HTTPS, flags de cookies (Secure/HttpOnly/SameSite), security.txt | ✅ |
+| `security_score` | Auditoría completa: score 0-100, riesgo, desglose por categoría y hallazgos priorizados con remediación | ✅ |
+| `security_report` | Reporte completo ya renderizado como HTML (score visual, gauge, barras) | ✅ |
 
 ### Prompt
 
@@ -52,7 +56,8 @@ npm start
 ## Desarrollo
 
 ```bash
-npm run dev   # ts-node con ESM — sin paso de build
+npm run dev    # ts-node con ESM — sin paso de build
+npm test       # compila y corre la suite (node:test)
 ```
 
 > Nota: Claude ejecuta el `.js` compilado en `dist/`. Después de cambiar el código en `src/`, corré `npm run build` para regenerar `dist/`.
@@ -83,15 +88,22 @@ src/
         findings.ts          → tipos compartidos de hallazgos (Finding, Remediation, severidad)
         dns/
             lookup.ts        → dns_lookup
-            spf-dmarc.ts     → spf_dmarc_check
+            spf-dmarc.ts     → spf_dmarc_check (+ parsers puros classifySpf/classifyDmarc)
             dkim.ts          → dkim_check
+            email-extras.ts  → email_extras_check (MTA-STS, TLS-RPT, BIMI)
+            domain-info.ts   → domain_info_check (CAA, DNSSEC, RDAP)
         ssl/
             check.ts         → ssl_check
         http/
+            fetch.ts         → helper httpGet (sigue redirects, body opcional)
             header.ts        → headers_check
             cors.ts          → cors_check
+            web-extras.ts    → web_extras_check (HTTP→HTTPS, cookies, security.txt)
         score/
             engine.ts        → security_score (orquesta todo y calcula el score)
+        report/
+            html.ts          → renderReport (HTML determinístico para security_report)
+    tests/                   → suite con node:test (parsers, scoring, findings, report)
 ```
 
 ## Alcance

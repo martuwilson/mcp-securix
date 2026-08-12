@@ -78,7 +78,7 @@ async function checkHttpsRedirect(domain: string): Promise<HttpsRedirectResult> 
   }
 }
 
-function parseCookie(raw: string): CookieInfo {
+export function parseCookie(raw: string): CookieInfo {
   const parts = raw.split(";").map((p) => p.trim());
   const name = parts[0]?.split("=")[0] ?? "(sin nombre)";
   const lower = parts.map((p) => p.toLowerCase());

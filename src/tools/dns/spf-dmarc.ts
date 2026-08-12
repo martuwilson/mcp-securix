@@ -24,6 +24,49 @@ export interface SpfDmarcResult {
   dmarc: DmarcResult;
 }
 
+/**
+ * Clasifica un registro SPF ya obtenido. Función pura (sin DNS) para poder
+ * testearla de forma aislada.
+ */
+export function classifySpf(spfRecord: string): SpfResult {
+  // Extraer el calificador final (-all, ~all, +all, ?all)
+  const match = spfRecord.match(/([+~\-?])all/);
+  const qualifier = match ? match[1] : null;
+
+  if (qualifier === "-") {
+    return {
+      exists: true,
+      record: spfRecord,
+      qualifier: "-all",
+      verdict: "strong",
+      detail: "SPF configurado correctamente. Emails no autorizados son rechazados.",
+    };
+  } else if (qualifier === "~") {
+    return {
+      exists: true,
+      record: spfRecord,
+      qualifier: "~all",
+      verdict: "weak",
+      detail: "SPF en soft fail (~all). Emails no autorizados son marcados pero no rechazados. Recomendado: cambiar a -all.",
+    };
+  } else if (qualifier === "+") {
+    return {
+      exists: true,
+      record: spfRecord,
+      qualifier: "+all",
+      verdict: "dangerous",
+      detail: "SPF con +all: cualquier servidor puede enviar emails como este dominio. Configuración peligrosa.",
+    };
+  } else {
+    return {
+      exists: true,
+      record: spfRecord,
+      verdict: "weak",
+      detail: "SPF encontrado pero sin calificador claro. Revisión manual recomendada.",
+    };
+  }
+}
+
 async function checkSpf(domain: string): Promise<SpfResult> {
   try {
     const records = await dns.resolveTxt(domain);
@@ -38,42 +81,7 @@ async function checkSpf(domain: string): Promise<SpfResult> {
       };
     }
 
-    // Extraer el calificador final (-all, ~all, +all, ?all)
-    const match = spfRecord.match(/([+~\-?])all/);
-    const qualifier = match ? match[1] : null;
-
-    if (qualifier === "-") {
-      return {
-        exists: true,
-        record: spfRecord,
-        qualifier: "-all",
-        verdict: "strong",
-        detail: "SPF configurado correctamente. Emails no autorizados son rechazados.",
-      };
-    } else if (qualifier === "~") {
-      return {
-        exists: true,
-        record: spfRecord,
-        qualifier: "~all",
-        verdict: "weak",
-        detail: "SPF en soft fail (~all). Emails no autorizados son marcados pero no rechazados. Recomendado: cambiar a -all.",
-      };
-    } else if (qualifier === "+") {
-      return {
-        exists: true,
-        record: spfRecord,
-        qualifier: "+all",
-        verdict: "dangerous",
-        detail: "SPF con +all: cualquier servidor puede enviar emails como este dominio. Configuración peligrosa.",
-      };
-    } else {
-      return {
-        exists: true,
-        record: spfRecord,
-        verdict: "weak",
-        detail: "SPF encontrado pero sin calificador claro. Revisión manual recomendada.",
-      };
-    }
+    return classifySpf(spfRecord);
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code === "ENODATA" || code === "ENOTFOUND") {
@@ -84,6 +92,41 @@ async function checkSpf(domain: string): Promise<SpfResult> {
       };
     }
     throw err;
+  }
+}
+
+/**
+ * Clasifica un registro DMARC ya obtenido. Función pura (sin DNS) para tests.
+ */
+export function classifyDmarc(dmarcRecord: string): DmarcResult {
+  // Extraer la policy (p=none, p=quarantine, p=reject)
+  const match = dmarcRecord.match(/p=(none|quarantine|reject)/);
+  const policy = match ? (match[1] as "none" | "quarantine" | "reject") : undefined;
+
+  if (policy === "reject") {
+    return {
+      exists: true,
+      record: dmarcRecord,
+      policy,
+      verdict: "strong",
+      detail: "DMARC con p=reject. Emails no autorizados son rechazados directamente.",
+    };
+  } else if (policy === "quarantine") {
+    return {
+      exists: true,
+      record: dmarcRecord,
+      policy,
+      verdict: "weak",
+      detail: "DMARC con p=quarantine. Emails sospechosos van a spam. Recomendado: evolucionar a p=reject.",
+    };
+  } else {
+    return {
+      exists: true,
+      record: dmarcRecord,
+      policy,
+      verdict: "weak",
+      detail: "DMARC con p=none. Solo monitoreo, sin acción. No protege contra spoofing activo.",
+    };
   }
 }
 
@@ -101,35 +144,7 @@ async function checkDmarc(domain: string): Promise<DmarcResult> {
       };
     }
 
-    // Extraer la policy (p=none, p=quarantine, p=reject)
-    const match = dmarcRecord.match(/p=(none|quarantine|reject)/);
-    const policy = match ? match[1] as "none" | "quarantine" | "reject" : undefined;
-
-    if (policy === "reject") {
-      return {
-        exists: true,
-        record: dmarcRecord,
-        policy,
-        verdict: "strong",
-        detail: "DMARC con p=reject. Emails no autorizados son rechazados directamente.",
-      };
-    } else if (policy === "quarantine") {
-      return {
-        exists: true,
-        record: dmarcRecord,
-        policy,
-        verdict: "weak",
-        detail: "DMARC con p=quarantine. Emails sospechosos van a spam. Recomendado: evolucionar a p=reject.",
-      };
-    } else {
-      return {
-        exists: true,
-        record: dmarcRecord,
-        policy,
-        verdict: "weak",
-        detail: "DMARC con p=none. Solo monitoreo, sin acción. No protege contra spoofing activo.",
-      };
-    }
+    return classifyDmarc(dmarcRecord);
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code === "ENODATA" || code === "ENOTFOUND") {
