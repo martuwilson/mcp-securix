@@ -6,6 +6,7 @@ import { domainInfoCheck, type DomainInfoResult } from "../dns/domain-info.js";
 import { sslCheck, type SslResult } from "../ssl/check.js";
 import { headersCheck, type HeadersResult } from "../http/header.js";
 import { corsCheck, type CorsResult } from "../http/cors.js";
+import { webExtrasCheck, type WebExtrasResult } from "../http/web-extras.js";
 import {
   type Finding,
   type Severity,
@@ -49,6 +50,7 @@ export interface SecurityScoreResult {
     ssl: SslResult;
     headers: HeadersResult;
     cors: CorsResult;
+    webExtras: WebExtrasResult;
   };
   generatedAt: string;
 }
@@ -396,7 +398,7 @@ export async function securityScore(domain: string): Promise<SecurityScoreResult
   const hasMx = !!(dns.records.MX && dns.records.MX.length > 0);
 
   // El resto corre en paralelo.
-  const [spfDmarc, dkim, emailExtras, domainInfo, ssl, headers, cors] =
+  const [spfDmarc, dkim, emailExtras, domainInfo, ssl, headers, cors, webExtras] =
     await Promise.all([
       spfDmarcCheck(domain),
       dkimCheck(domain),
@@ -405,6 +407,7 @@ export async function securityScore(domain: string): Promise<SecurityScoreResult
       sslCheck(domain),
       headersCheck(domain),
       corsCheck(domain),
+      webExtrasCheck(domain),
     ]);
 
   const findings: Finding[] = [];
@@ -427,7 +430,9 @@ export async function securityScore(domain: string): Promise<SecurityScoreResult
     // afectan el puntaje numérico pero sí aparecen en el reporte.
     ...emailExtras.findings,
     // CAA, DNSSEC y expiración del dominio.
-    ...domainInfo.findings
+    ...domainInfo.findings,
+    // Web extra: redirect HTTPS, flags de cookies, security.txt.
+    ...webExtras.findings
   );
 
   // DNS: hallazgos informativos de baja severidad.
@@ -478,7 +483,7 @@ export async function securityScore(domain: string): Promise<SecurityScoreResult
     penalties: { cors: corsPenalty },
     findings: sortFindings(findings),
     summary: countBySeverity(findings),
-    details: { dns, spfDmarc, dkim, emailExtras, domainInfo, ssl, headers, cors },
+    details: { dns, spfDmarc, dkim, emailExtras, domainInfo, ssl, headers, cors, webExtras },
     generatedAt: new Date().toISOString(),
   };
 }

@@ -103,7 +103,7 @@ function findingRow(f: Finding): string {
 
 export function renderReport(r: SecurityScoreResult): string {
   const riskColor = RISK_COLOR[r.risk];
-  const { ssl, spfDmarc, dkim, emailExtras, domainInfo, headers, cors, dns } = r.details;
+  const { ssl, spfDmarc, dkim, emailExtras, domainInfo, headers, cors, webExtras, dns } = r.details;
 
   // Gauge circular del score.
   const radius = 54;
@@ -265,6 +265,13 @@ export function renderReport(r: SecurityScoreResult): string {
   ${section("CORS", `
     <div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;padding:16px;">
       <p style="margin:0;font-size:13px;color:#4b5563;"><strong style="color:#111827;">${esc(cors.verdict)}</strong> — ${esc(cors.detail)}</p>
+    </div>`)}
+
+  ${section("Web adicional", `
+    <div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;padding:16px;display:flex;flex-wrap:wrap;gap:10px;">
+      ${emailChip("HTTP→HTTPS", webExtras.httpsRedirect.verdict === "strong", webExtras.httpsRedirect.verdict !== "error")}
+      ${emailChip("Cookies seguras", webExtras.cookies.verdict === "strong", webExtras.cookies.verdict !== "none")}
+      ${emailChip("security.txt", webExtras.securityTxt.verdict === "present", webExtras.securityTxt.verdict === "present")}
     </div>`)}
 
   ${section("Hallazgos priorizados", `

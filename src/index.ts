@@ -9,6 +9,7 @@ import { domainInfoCheck } from "./tools/dns/domain-info.js";
 import { sslCheck } from "./tools/ssl/check.js";
 import { headersCheck } from "./tools/http/header.js";
 import { corsCheck } from "./tools/http/cors.js";
+import { webExtrasCheck } from "./tools/http/web-extras.js";
 import { securityScore } from "./tools/score/engine.js";
 import { renderReport } from "./tools/report/html.js";
 
@@ -168,6 +169,26 @@ server.tool(
   },
   async ({ domain }) => {
     const result = await corsCheck(domain);
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify(result, null, 2),
+        },
+      ],
+    };
+  }
+);
+
+// Web Extras Tool (redirect HTTPS, cookies, security.txt)
+server.tool(
+  "web_extras_check",
+  "Analiza controles web adicionales: redirect HTTP→HTTPS, flags de seguridad de cookies (Secure, HttpOnly, SameSite) y presencia de security.txt (RFC 9116).",
+  {
+    domain: z.string().describe("El dominio a analizar, sin https://, por ejemplo 'example.com'"),
+  },
+  async ({ domain }) => {
+    const result = await webExtrasCheck(domain);
     return {
       content: [
         {
