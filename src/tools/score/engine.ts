@@ -1,6 +1,7 @@
 import { dnsLookup, type DnsLookupResult } from "../dns/lookup.js";
 import { spfDmarcCheck, type SpfDmarcResult } from "../dns/spf-dmarc.js";
 import { dkimCheck, type DkimResult } from "../dns/dkim.js";
+import { emailExtrasCheck, type EmailExtrasResult } from "../dns/email-extras.js";
 import { sslCheck, type SslResult } from "../ssl/check.js";
 import { headersCheck, type HeadersResult } from "../http/header.js";
 import { corsCheck, type CorsResult } from "../http/cors.js";
@@ -42,6 +43,7 @@ export interface SecurityScoreResult {
     dns: DnsLookupResult;
     spfDmarc: SpfDmarcResult;
     dkim: DkimResult;
+    emailExtras: EmailExtrasResult;
     ssl: SslResult;
     headers: HeadersResult;
     cors: CorsResult;
@@ -386,11 +388,16 @@ function scoreHeaders(headers: HeadersResult): { points: number; detail: string;
 }
 
 export async function securityScore(domain: string): Promise<SecurityScoreResult> {
-  // Correr todas las tools en paralelo.
-  const [dns, spfDmarc, dkim, ssl, headers, cors] = await Promise.all([
-    dnsLookup(domain),
+  // Resolvemos DNS primero para saber si el dominio tiene MX (correo): eso
+  // define si los controles de email avanzado aplican de verdad.
+  const dns = await dnsLookup(domain);
+  const hasMx = !!(dns.records.MX && dns.records.MX.length > 0);
+
+  // El resto corre en paralelo.
+  const [spfDmarc, dkim, emailExtras, ssl, headers, cors] = await Promise.all([
     spfDmarcCheck(domain),
     dkimCheck(domain),
+    emailExtrasCheck(domain, hasMx),
     sslCheck(domain),
     headersCheck(domain),
     corsCheck(domain),
@@ -411,7 +418,10 @@ export async function securityScore(domain: string): Promise<SecurityScoreResult
     // DKIM y CORS aportan sus propios findings (DKIM es informativo; CORS
     // solo genera hallazgos cuando hay misconfiguración).
     ...dkim.findings,
-    ...cors.findings
+    ...cors.findings,
+    // Controles de email avanzado (MTA-STS, TLS-RPT, BIMI): low/info, no
+    // afectan el puntaje numérico pero sí aparecen en el reporte.
+    ...emailExtras.findings
   );
 
   // DNS: hallazgos informativos de baja severidad.
@@ -462,7 +472,7 @@ export async function securityScore(domain: string): Promise<SecurityScoreResult
     penalties: { cors: corsPenalty },
     findings: sortFindings(findings),
     summary: countBySeverity(findings),
-    details: { dns, spfDmarc, dkim, ssl, headers, cors },
+    details: { dns, spfDmarc, dkim, emailExtras, ssl, headers, cors },
     generatedAt: new Date().toISOString(),
   };
 }

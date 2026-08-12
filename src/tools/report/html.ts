@@ -73,6 +73,13 @@ function statusCard(
     </div>`;
 }
 
+/** Chip de control de email avanzado: verde=óptimo, amarillo=presente-mejorable, gris=ausente. */
+function emailChip(label: string, optimal: boolean, present: boolean): string {
+  const color = optimal ? "#16a34a" : present ? "#d97706" : "#9ca3af";
+  const mark = present ? (optimal ? "✓" : "±") : "✕";
+  return `<span style="display:inline-flex;align-items:center;gap:6px;font-size:13px;color:#4b5563;background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px;padding:6px 12px;"><span style="color:${color};font-weight:700;">${mark}</span>${esc(label)}</span>`;
+}
+
 function findingRow(f: Finding): string {
   const s = SEVERITY_STYLE[f.severity];
   const rem = f.remediation;
@@ -96,7 +103,7 @@ function findingRow(f: Finding): string {
 
 export function renderReport(r: SecurityScoreResult): string {
   const riskColor = RISK_COLOR[r.risk];
-  const { ssl, spfDmarc, dkim, headers, cors, dns } = r.details;
+  const { ssl, spfDmarc, dkim, emailExtras, headers, cors, dns } = r.details;
 
   // Gauge circular del score.
   const radius = 54;
@@ -237,6 +244,14 @@ export function renderReport(r: SecurityScoreResult): string {
       <div><p style="font-size:11px;font-weight:600;color:#9ca3af;text-transform:uppercase;margin:0 0 6px;">Name Servers</p><p style="margin:0;line-height:1.9;">${nsRecords}</p></div>
       <div><p style="font-size:11px;font-weight:600;color:#9ca3af;text-transform:uppercase;margin:0 0 6px;">Correo (MX)</p><p style="margin:0;">${mxRecords}</p></div>
       <div><p style="font-size:11px;font-weight:600;color:#9ca3af;text-transform:uppercase;margin:0 0 6px;">IPv6 (AAAA)</p><p style="margin:0;color:#4b5563;">${esc(ipv6)}</p></div>
+    </div>`)}
+
+  ${section("Email avanzado", `
+    <div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;padding:16px;display:flex;flex-wrap:wrap;gap:10px;">
+      ${emailChip("MTA-STS", emailExtras.mtaSts.verdict === "strong", emailExtras.mtaSts.verdict !== "missing")}
+      ${emailChip("TLS-RPT", emailExtras.tlsRpt.verdict === "present", emailExtras.tlsRpt.verdict === "present")}
+      ${emailChip("BIMI", emailExtras.bimi.verdict === "present", emailExtras.bimi.verdict === "present")}
+      ${!emailExtras.hasMx ? '<p style="margin:0;font-size:12px;color:#9ca3af;width:100%;">El dominio no tiene MX: estos controles son opcionales.</p>' : ""}
     </div>`)}
 
   ${section("CORS", `

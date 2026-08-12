@@ -4,6 +4,7 @@ import { z } from "zod";
 import { dnsLookup } from "./tools/dns/lookup.js";
 import { spfDmarcCheck } from "./tools/dns/spf-dmarc.js";
 import { dkimCheck } from "./tools/dns/dkim.js";
+import { emailExtrasCheck } from "./tools/dns/email-extras.js";
 import { sslCheck } from "./tools/ssl/check.js";
 import { headersCheck } from "./tools/http/header.js";
 import { corsCheck } from "./tools/http/cors.js";
@@ -84,6 +85,28 @@ server.tool(
   },
   async ({ domain }) => {
     const result = await headersCheck(domain);
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify(result, null, 2),
+        },
+      ],
+    };
+  }
+);
+
+// Email Extras Tool (MTA-STS, TLS-RPT, BIMI)
+server.tool(
+  "email_extras_check",
+  "Verifica controles de email avanzados que complementan SPF/DMARC/DKIM: MTA-STS (fuerza TLS en la entrega SMTP), TLS-RPT (reportes de fallos TLS) y BIMI (logo verificado). Solo relevantes si el dominio tiene MX.",
+  {
+    domain: z.string().describe("El dominio a auditar, por ejemplo 'example.com'"),
+  },
+  async ({ domain }) => {
+    const dns = await dnsLookup(domain);
+    const hasMx = !!(dns.records.MX && dns.records.MX.length > 0);
+    const result = await emailExtrasCheck(domain, hasMx);
     return {
       content: [
         {
