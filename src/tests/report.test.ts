@@ -12,12 +12,15 @@ function fakeResult(): SecurityScoreResult {
     percentage: 65,
     risk: "medium",
     breakdown: {
-      ssl: { points: 25, max: 25, detail: "" },
-      spf: { points: 16, max: 20, detail: "" },
-      dmarc: { points: 0, max: 25, detail: "" },
-      headers: { points: 24, max: 30, detail: "" },
+      tls: { points: 21, max: 26, percentage: 81, applicable: true },
+      email: { points: 12, max: 30, percentage: 40, applicable: true },
+      web: { points: 24, max: 30, percentage: 80, applicable: true },
+      dns: { points: 2, max: 8, percentage: 25, applicable: true },
     },
     penalties: { cors: 0 },
+    scoreItems: [
+      { key: "ssl", label: "Certificado SSL/TLS", group: "tls", earned: 18, max: 18, applicable: true },
+    ],
     findings: [
       {
         id: "dmarc-missing",

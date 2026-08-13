@@ -32,16 +32,20 @@ Cada herramienta devuelve JSON estructurado. Los hallazgos incluyen severidad, i
 
 ## Scoring
 
-El `security_score` pondera cuatro pilares (suman 100):
+El `security_score` usa un **modelo normalizado**: cada control aporta `puntos ganados / puntos aplicables`, y el score final es `ganados / aplicables × 100`. Lo que no aplica se **excluye del cálculo** (no penaliza), así el número siempre es justo y queda en 0-100.
 
-| Categoría | Peso |
-|-----------|------|
-| SSL/TLS | 25 |
-| SPF | 20 |
-| DMARC | 25 |
-| HTTP headers | 30 |
+Controles agrupados y su peso relativo:
 
-Los veredictos `weak` reciben crédito parcial (una config razonable como SPF `~all` penaliza poco). Un CORS peligroso aplica una penalización adicional de 15 puntos. Los hallazgos se ordenan por severidad (`critical` → `info`), y DKIM es informativo (no resta puntaje, porque no encontrar un selector común no confirma su ausencia).
+| Grupo | Controles (peso) |
+|-------|------------------|
+| **TLS / Certificados** | SSL 18 · HTTP→HTTPS 5 · CAA 3 |
+| **Email** *(se excluye si el dominio no tiene MX)* | DMARC 12 · SPF 9 · DKIM 5 · MTA-STS 2 · TLS-RPT 1 · BIMI 1 |
+| **Web / Headers** | HSTS 7 · CSP 7 · X-Content-Type 3 · X-Frame 3 · Referrer 1 · Permissions 1 · Cookies 4 · CORS 3 · security.txt 1 |
+| **DNS** | DNSSEC 6 · Expiración del dominio 3 · IPv6 2 |
+
+Se excluyen del cálculo (no aplican): todo el grupo Email si no hay MX · DKIM si es `unknown` · Cookies si el sitio no setea ninguna · DNSSEC/expiración si el RDAP no los reporta · redirect/CORS si no se pudieron evaluar.
+
+Los veredictos `weak` reciben crédito parcial. Un CORS peligroso descuenta 15 puntos extra del score final (su peso normal subestima el riesgo). Los hallazgos se ordenan por severidad (`critical` → `info`); la severidad de SPF/DMARC escala según si el dominio maneja correo. El desglose por grupo y el detalle por control se exponen en `breakdown` y `scoreItems`.
 
 Bandas de riesgo: `low` ≥ 80, `medium` ≥ 60, `high` ≥ 40, `critical` < 40.
 

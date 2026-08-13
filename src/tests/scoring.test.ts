@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { scoreSsl, scoreSpf, scoreDmarc, scoreHeaders } from "../tools/score/engine.js";
+import { scoreSsl, scoreSpf, scoreDmarc, scoreHeaders, buildScoreItems } from "../tools/score/engine.js";
+import type { SecurityScoreResult } from "../tools/score/engine.js";
 import { sortFindings, countBySeverity, type Finding } from "../tools/findings.js";
 import type { SslResult } from "../tools/ssl/check.js";
 import type { SpfResult, DmarcResult } from "../tools/dns/spf-dmarc.js";
@@ -116,6 +117,75 @@ test("sortFindings ordena critical antes que low", () => {
   ];
   const sorted = sortFindings(findings);
   assert.deepEqual(sorted.map((f) => f.id), ["b", "c", "a"]);
+});
+
+function fakeDetails(): SecurityScoreResult["details"] {
+  return {
+    dns: { domain: "x.com", records: { A: ["1.2.3.4"], MX: [{ exchange: "m", priority: 10 }] } },
+    spfDmarc: {
+      domain: "x.com",
+      spf: { exists: true, qualifier: "-all", verdict: "strong", detail: "" },
+      dmarc: { exists: true, policy: "reject", verdict: "strong", detail: "" },
+    },
+    dkim: { domain: "x.com", found: [], selectorsProbed: 15, verdict: "unknown", detail: "", findings: [] },
+    emailExtras: {
+      domain: "x.com", hasMx: true,
+      mtaSts: { exists: false, verdict: "missing", detail: "" },
+      tlsRpt: { exists: false, verdict: "missing", detail: "" },
+      bimi: { exists: false, hasVmc: false, verdict: "missing", detail: "" },
+      findings: [],
+    },
+    domainInfo: {
+      domain: "x.com",
+      caa: { exists: true, issuers: ["letsencrypt.org"], verdict: "present", detail: "" },
+      registration: { available: false, daysUntilExpiry: 300, dnssec: true, detail: "" },
+      findings: [],
+    },
+    ssl: { domain: "x.com", valid: true, verdict: "strong", detail: "", protocol: "TLSv1.3", daysUntilExpiry: 90 },
+    headers: { domain: "x.com", url: "https://x.com", headers: { found: [], missing: [] }, checks: {}, verdict: "strong", detail: "" },
+    cors: { domain: "x.com", url: "https://x.com", probeOrigin: "x", verdict: "none", detail: "", findings: [] },
+    webExtras: {
+      domain: "x.com",
+      httpsRedirect: { redirects: true, verdict: "strong", detail: "" },
+      cookies: { count: 0, cookies: [], verdict: "none", detail: "" },
+      securityTxt: { exists: true, verdict: "present", detail: "" },
+      findings: [],
+    },
+  };
+}
+
+test("buildScoreItems: sin MX excluye todo el grupo email", () => {
+  const items = buildScoreItems(fakeDetails(), false);
+  const email = items.filter((i) => i.group === "email");
+  assert.ok(email.length > 0);
+  assert.ok(email.every((i) => !i.applicable));
+});
+
+test("buildScoreItems: con MX el email aplica", () => {
+  const items = buildScoreItems(fakeDetails(), true);
+  const dmarc = items.find((i) => i.key === "dmarc");
+  assert.equal(dmarc?.applicable, true);
+  assert.equal(dmarc?.earned, 12);
+});
+
+test("buildScoreItems: DKIM unknown se excluye (no penaliza)", () => {
+  const items = buildScoreItems(fakeDetails(), true);
+  const dkim = items.find((i) => i.key === "dkim");
+  assert.equal(dkim?.applicable, false);
+});
+
+test("buildScoreItems: cookies 'none' se excluye del cálculo", () => {
+  const items = buildScoreItems(fakeDetails(), true);
+  const cookies = items.find((i) => i.key === "cookies");
+  assert.equal(cookies?.applicable, false);
+});
+
+test("buildScoreItems: DNSSEC indeterminado (null) se excluye", () => {
+  const d = fakeDetails();
+  d.domainInfo.registration.dnssec = undefined;
+  const items = buildScoreItems(d, true);
+  const dnssec = items.find((i) => i.key === "dnssec");
+  assert.equal(dnssec?.applicable, false);
 });
 
 test("countBySeverity cuenta bien", () => {

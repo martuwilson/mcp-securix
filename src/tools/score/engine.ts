@@ -14,17 +14,32 @@ import {
   countBySeverity,
 } from "../findings.js";
 
+export type ScoreGroup = "tls" | "email" | "web" | "dns";
+
 export interface CategoryScore {
   points: number;
   max: number;
-  detail: string;
+  percentage: number;
+  /** false cuando el grupo entero no aplica (ej. email sin MX). */
+  applicable: boolean;
 }
 
 export interface ScoreBreakdown {
-  ssl: CategoryScore;
-  spf: CategoryScore;
-  dmarc: CategoryScore;
-  headers: CategoryScore;
+  tls: CategoryScore;
+  email: CategoryScore;
+  web: CategoryScore;
+  dns: CategoryScore;
+}
+
+/** Un control individual y su aporte al score normalizado. */
+export interface ScoreItem {
+  key: string;
+  label: string;
+  group: ScoreGroup;
+  earned: number;
+  max: number;
+  /** Si false, el control se excluye del cálculo (no aplica / indeterminado). */
+  applicable: boolean;
 }
 
 export interface SecurityScoreResult {
@@ -36,6 +51,8 @@ export interface SecurityScoreResult {
   breakdown: ScoreBreakdown;
   /** Penalizaciones aplicadas fuera de las 4 categorías base (ej. CORS peligroso). */
   penalties: { cors: number };
+  /** Detalle de cada control y su aporte al score normalizado. */
+  scoreItems: ScoreItem[];
   /** Hallazgos estructurados con remediación, ordenados de más a menos grave. */
   findings: Finding[];
   /** Conteo de hallazgos por severidad. */
@@ -402,6 +419,125 @@ export function scoreHeaders(headers: HeadersResult): { points: number; detail: 
   return { points, detail, findings };
 }
 
+// --- Modelo de score normalizado ---
+// Cada control aporta earned/max. Lo que no aplica (applicable=false) se excluye
+// de ambos lados, así el score es justo y siempre queda en 0-100:
+//   score = round( sum(earned aplicables) / sum(max aplicables) * 100 )
+type ScoreDetails = SecurityScoreResult["details"];
+
+export function buildScoreItems(d: ScoreDetails, hasMx: boolean): ScoreItem[] {
+  const items: ScoreItem[] = [];
+  const add = (
+    key: string,
+    label: string,
+    group: ScoreGroup,
+    earned: number,
+    max: number,
+    applicable = true
+  ) => items.push({ key, label, group, earned, max, applicable });
+
+  // ---- TLS / Certificados ----
+  const sslEarned =
+    d.ssl.verdict === "strong"
+      ? 18
+      : d.ssl.verdict === "weak"
+        ? d.ssl.protocol === "TLSv1" || d.ssl.protocol === "TLSv1.1"
+          ? 10
+          : 13
+        : 0;
+  add("ssl", "Certificado SSL/TLS", "tls", sslEarned, 18);
+
+  const redirect = d.webExtras.httpsRedirect.verdict;
+  add("https-redirect", "Redirect HTTP→HTTPS", "tls", redirect === "strong" ? 5 : 0, 5, redirect !== "error");
+
+  add("caa", "CAA", "tls", d.domainInfo.caa.verdict === "present" ? 3 : 0, 3);
+
+  // ---- Email (todo el grupo se excluye si el dominio no tiene MX) ----
+  const dmarcPts =
+    d.spfDmarc.dmarc.verdict === "strong"
+      ? 12
+      : d.spfDmarc.dmarc.policy === "quarantine"
+        ? 9
+        : d.spfDmarc.dmarc.verdict === "weak"
+          ? 5
+          : 0;
+  add("dmarc", "DMARC", "email", dmarcPts, 12, hasMx);
+
+  const spfPts =
+    d.spfDmarc.spf.verdict === "strong"
+      ? 9
+      : d.spfDmarc.spf.qualifier === "~all"
+        ? 7
+        : d.spfDmarc.spf.verdict === "weak"
+          ? 4
+          : 0;
+  add("spf", "SPF", "email", spfPts, 9, hasMx);
+
+  // DKIM: solo suma cuando lo detectamos. 'unknown' se excluye (no penaliza).
+  add("dkim", "DKIM", "email", d.dkim.verdict === "found" ? 5 : 0, 5, hasMx && d.dkim.verdict === "found");
+
+  const mtaPts =
+    d.emailExtras.mtaSts.verdict === "strong" ? 2 : d.emailExtras.mtaSts.verdict === "weak" ? 1 : 0;
+  add("mta-sts", "MTA-STS", "email", mtaPts, 2, hasMx);
+  add("tls-rpt", "TLS-RPT", "email", d.emailExtras.tlsRpt.verdict === "present" ? 1 : 0, 1, hasMx);
+  add("bimi", "BIMI", "email", d.emailExtras.bimi.verdict === "present" ? 1 : 0, 1, hasMx);
+
+  // ---- Web / Headers ----
+  const hv = (name: string) => d.headers.checks?.[name]?.verdict;
+  const headerPts = (name: string, strong: number, weak: number) => {
+    const v = hv(name);
+    return v === "strong" ? strong : v === "weak" ? weak : 0;
+  };
+  add("hsts", "HSTS", "web", headerPts("strict-transport-security", 7, 3), 7);
+  add("csp", "CSP", "web", headerPts("content-security-policy", 7, 3), 7);
+  add("x-content-type", "X-Content-Type-Options", "web", headerPts("x-content-type-options", 3, 1), 3);
+
+  // X-Frame-Options: si falta pero la CSP cubre con frame-ancestors, damos crédito completo.
+  const cspVal = d.headers.checks?.["content-security-policy"]?.value ?? "";
+  const cspFrameAncestors = /frame-ancestors/i.test(cspVal);
+  const xfoV = hv("x-frame-options");
+  const xfoPts = xfoV === "strong" ? 3 : xfoV === "weak" ? 1 : cspFrameAncestors ? 3 : 0;
+  add("x-frame", "X-Frame-Options", "web", xfoPts, 3);
+
+  add("referrer", "Referrer-Policy", "web", headerPts("referrer-policy", 1, 0), 1);
+  add("permissions", "Permissions-Policy", "web", headerPts("permissions-policy", 1, 0), 1);
+
+  // Cookies: si el sitio no setea ninguna, no aplica.
+  const ck = d.webExtras.cookies.verdict;
+  add("cookies", "Cookies seguras", "web", ck === "strong" ? 4 : ck === "weak" ? 2 : 0, 4, ck !== "none");
+
+  const corsV = d.cors.verdict;
+  const corsPts = corsV === "none" || corsV === "safe" ? 3 : corsV === "permissive" ? 2 : 0;
+  add("cors", "CORS", "web", corsPts, 3, corsV !== "error");
+
+  add("security-txt", "security.txt", "web", d.webExtras.securityTxt.verdict === "present" ? 1 : 0, 1);
+
+  // ---- DNS ----
+  const dnssec = d.domainInfo.registration.dnssec;
+  add("dnssec", "DNSSEC", "dns", dnssec ? 6 : 0, 6, dnssec != null);
+
+  const days = d.domainInfo.registration.daysUntilExpiry;
+  const expiryPts = days == null ? 0 : days > 60 ? 3 : days > 30 ? 1 : 0;
+  add("domain-expiry", "Expiración del dominio", "dns", expiryPts, 3, days != null);
+
+  const hasIpv6 = !!(d.dns.records.AAAA && d.dns.records.AAAA.length > 0);
+  add("ipv6", "IPv6", "dns", hasIpv6 ? 2 : 0, 2);
+
+  return items;
+}
+
+function summarizeGroup(items: ScoreItem[], group: ScoreGroup): CategoryScore {
+  const applicable = items.filter((i) => i.group === group && i.applicable);
+  const max = applicable.reduce((s, i) => s + i.max, 0);
+  const points = applicable.reduce((s, i) => s + i.earned, 0);
+  return {
+    points,
+    max,
+    percentage: max > 0 ? Math.round((points / max) * 100) : 0,
+    applicable: applicable.length > 0,
+  };
+}
+
 export async function securityScore(domain: string): Promise<SecurityScoreResult> {
   // Resolvemos DNS primero para saber si el dominio tiene MX (correo): eso
   // define si los controles de email avanzado aplican de verdad.
@@ -467,34 +603,40 @@ export async function securityScore(domain: string): Promise<SecurityScoreResult
     });
   }
 
-  // Puntaje base sobre las 4 categorías (suma 100).
-  const baseScore =
-    sslScore.points + spfScore.points + dmarcScore.points + headersScore.points;
+  // Los scoreSsl/Spf/Dmarc/Headers de arriba solo se usan para generar findings.
+  // El número del score sale del modelo normalizado por control.
+  const details = { dns, spfDmarc, dkim, emailExtras, domainInfo, ssl, headers, cors, webExtras };
+  const scoreItems = buildScoreItems(details, hasMx);
 
-  // Penalización por CORS peligroso: es un riesgo crítico que no encaja en las
-  // 4 categorías base, así que resta directo (con piso en 0).
+  const applicable = scoreItems.filter((i) => i.applicable);
+  const earnedTotal = applicable.reduce((s, i) => s + i.earned, 0);
+  const maxTotal = applicable.reduce((s, i) => s + i.max, 0);
+  let percentage = maxTotal > 0 ? Math.round((earnedTotal / maxTotal) * 100) : 0;
+
+  // Penalización dura por CORS peligroso: es un riesgo crítico cuyo peso normal
+  // (3 pts) subestima el impacto real, así que descuenta directo del score final.
   const corsPenalty = cors.verdict === "dangerous" ? 15 : 0;
-  const totalScore = Math.max(0, baseScore - corsPenalty);
+  percentage = Math.max(0, percentage - corsPenalty);
 
   const maxScore = 100;
-  const percentage = Math.round((totalScore / maxScore) * 100);
 
   return {
     domain,
-    score: totalScore,
+    score: percentage,
     maxScore,
     percentage,
     risk: calculateRisk(percentage),
     breakdown: {
-      ssl: { points: sslScore.points, max: 25, detail: sslScore.detail },
-      spf: { points: spfScore.points, max: 20, detail: spfScore.detail },
-      dmarc: { points: dmarcScore.points, max: 25, detail: dmarcScore.detail },
-      headers: { points: headersScore.points, max: 30, detail: headersScore.detail },
+      tls: summarizeGroup(scoreItems, "tls"),
+      email: summarizeGroup(scoreItems, "email"),
+      web: summarizeGroup(scoreItems, "web"),
+      dns: summarizeGroup(scoreItems, "dns"),
     },
     penalties: { cors: corsPenalty },
+    scoreItems,
     findings: sortFindings(findings),
     summary: countBySeverity(findings),
-    details: { dns, spfDmarc, dkim, emailExtras, domainInfo, ssl, headers, cors, webExtras },
+    details,
     generatedAt: new Date().toISOString(),
   };
 }

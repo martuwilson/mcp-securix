@@ -40,15 +40,25 @@ function code(s: unknown): string {
 }
 
 /** Barra de progreso para el desglose por categoría. */
-function bar(label: string, points: number, max: number): string {
-  const ratio = max > 0 ? points / max : 0;
+function bar(label: string, cat: { points: number; max: number; applicable: boolean }): string {
+  if (!cat.applicable) {
+    return `
+    <div style="margin-bottom:12px;">
+      <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:5px;">
+        <span style="color:#374151;">${esc(label)}</span>
+        <span style="font-weight:600;color:#9ca3af;">N/A</span>
+      </div>
+      <div style="background:#e5e7eb;border-radius:6px;height:7px;"></div>
+    </div>`;
+  }
+  const ratio = cat.max > 0 ? cat.points / cat.max : 0;
   const pct = Math.round(ratio * 100);
   const color = ratio >= 0.8 ? "#16a34a" : ratio >= 0.5 ? "#d97706" : "#dc2626";
   return `
     <div style="margin-bottom:12px;">
       <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:5px;">
         <span style="color:#374151;">${esc(label)}</span>
-        <span style="font-weight:600;color:${color};">${points} / ${max}</span>
+        <span style="font-weight:600;color:${color};">${cat.points} / ${cat.max}</span>
       </div>
       <div style="background:#e5e7eb;border-radius:6px;height:7px;overflow:hidden;">
         <div style="background:${color};width:${pct}%;height:7px;border-radius:6px;"></div>
@@ -222,10 +232,10 @@ export function renderReport(r: SecurityScoreResult): string {
     </div>
     <div style="flex:1;min-width:240px;">
       <p style="font-size:12px;color:#6b7280;font-weight:600;margin:0 0 12px;">Desglose por categoría</p>
-      ${bar("SSL / TLS", r.breakdown.ssl.points, r.breakdown.ssl.max)}
-      ${bar("SPF", r.breakdown.spf.points, r.breakdown.spf.max)}
-      ${bar("DMARC", r.breakdown.dmarc.points, r.breakdown.dmarc.max)}
-      ${bar("HTTP Headers", r.breakdown.headers.points, r.breakdown.headers.max)}
+      ${bar("TLS / Certificados", r.breakdown.tls)}
+      ${bar("Email", r.breakdown.email)}
+      ${bar("Web / Headers", r.breakdown.web)}
+      ${bar("DNS", r.breakdown.dns)}
       ${r.penalties.cors > 0 ? `<p style="font-size:12px;color:#dc2626;margin:6px 0 0;">− ${r.penalties.cors} pts por CORS peligroso</p>` : ""}
     </div>
   </div>
