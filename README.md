@@ -1,12 +1,40 @@
 # mcp-securix
 
-MCP Security Server — expone herramientas de reconocimiento y auditoría de seguridad de dominios para agentes de Claude, vía el Model Context Protocol.
+MCP Security Server — expone herramientas de reconocimiento y auditoría de seguridad de dominios (y apps locales) para agentes de Claude, vía el Model Context Protocol.
+
+## Para qué sirve
+
+Es un **auditor de seguridad "de caja negra"**: mira lo que cualquiera puede observar de un dominio desde afuera —DNS, TLS, headers HTTP, configuración de correo, CORS— y lo traduce en un **diagnóstico accionable y priorizado**. En vez de correr `dig`, `openssl`, revisar headers a mano y cruzar todo, le pedís a Claude *"auditá example.com"* y él llama a estas tools, junta los resultados y arma el informe.
+
+Casos de uso típicos:
+
+- Revisar tu propio dominio antes de un release.
+- Auditar el de un cliente en una consultoría o pentest de reconocimiento.
+- Chequear que un cambio de configuración no rompió los headers de seguridad ni el redirect a HTTPS.
+- Verificar la protección anti-spoofing del correo (SPF/DMARC/DKIM).
+- Comparar la postura de seguridad de varios dominios.
+- Auditar la configuración HTTP/TLS de una app que tenés levantada en **localhost** durante el desarrollo.
 
 ## Qué hace
 
-`mcp-securix` corre como un servidor MCP por stdio. Claude se conecta y gana acceso a herramientas que le permiten auditar dominios de forma autónoma: registros DNS, certificados SSL/TLS, autenticación de correo (SPF, DMARC, DKIM), headers de seguridad HTTP, configuración CORS y un score de seguridad compuesto.
+`mcp-securix` corre como un servidor MCP por stdio. Claude se conecta y gana acceso a herramientas que le permiten auditar objetivos de forma autónoma: registros DNS, certificados SSL/TLS, autenticación de correo (SPF, DMARC, DKIM), headers de seguridad HTTP, configuración CORS y un score de seguridad compuesto.
 
 Cada herramienta devuelve JSON estructurado. Los hallazgos incluyen severidad, impacto y remediación accionable (con el registro o header exacto para aplicar).
+
+### Objetivos aceptados
+
+Las herramientas HTTP/TLS aceptan tanto dominios públicos como targets locales:
+
+| Ejemplo de entrada | Interpretación |
+|--------------------|----------------|
+| `example.com` | `https://example.com`, TLS en el puerto 443 (comportamiento por defecto) |
+| `example.com:8443` | dominio público, pero en el puerto indicado |
+| `https://example.com` | esquema explícito respetado |
+| `localhost:3000` | app local sobre `http://localhost:3000` |
+| `http://127.0.0.1:8080` | esquema y puerto respetados |
+| `192.168.1.10:5000` | IP privada → tratado como target local |
+
+Un dominio pelado (`example.com`) se comporta exactamente como siempre. Cuando el objetivo es **local** (`localhost`, `*.local`, o IP privada RFC 1918/loopback), los controles que dependen de presencia pública en DNS o registro —SPF, DMARC, DKIM, MTA-STS/TLS-RPT/BIMI, CAA, DNSSEC, expiración— **no aplican** y se excluyen del análisis y del score. Se evalúa solo lo que tiene sentido en un entorno local: headers de seguridad, CORS, cookies y el certificado si el server habla TLS.
 
 ## Herramientas
 
@@ -43,7 +71,7 @@ Controles agrupados y su peso relativo:
 | **Web / Headers** | HSTS 7 · CSP 7 · X-Content-Type 3 · X-Frame 3 · Referrer 1 · Permissions 1 · Cookies 4 · CORS 3 · security.txt 1 |
 | **DNS** | DNSSEC 6 · Expiración del dominio 3 · IPv6 2 |
 
-Se excluyen del cálculo (no aplican): todo el grupo Email si no hay MX · DKIM si es `unknown` · Cookies si el sitio no setea ninguna · DNSSEC/expiración si el RDAP no los reporta · redirect/CORS si no se pudieron evaluar.
+Se excluyen del cálculo (no aplican): todo el grupo Email si no hay MX · DKIM si es `unknown` · Cookies si el sitio no setea ninguna · DNSSEC/expiración si el RDAP no los reporta · redirect/CORS si no se pudieron evaluar. En **targets locales** se excluyen además todos los controles de DNS/RDAP/correo y de trust público del certificado, así el score refleja solo la postura HTTP/CORS del entorno local.
 
 Los veredictos `weak` reciben crédito parcial. Un CORS peligroso descuenta 15 puntos extra del score final (su peso normal subestima el riesgo). Los hallazgos se ordenan por severidad (`critical` → `info`); la severidad de SPF/DMARC escala según si el dominio maneja correo. El desglose por grupo y el detalle por control se exponen en `breakdown` y `scoreItems`.
 
@@ -112,7 +140,9 @@ src/
 
 ## Alcance
 
-Esto es un análisis de configuración **externa**, no un pentest de la aplicación. No evalúa vulnerabilidades de la app, control de accesos ni el estado interno del servidor de correo.
+Esto es un análisis de **configuración** (postura de seguridad observable), no un pentest de la aplicación. No evalúa vulnerabilidades de la app, control de accesos ni el estado interno del servidor de correo.
+
+Contra dominios públicos el análisis es totalmente externo. Contra un target local, el MCP corre en tu misma máquina, así que puede alcanzar `localhost` y puertos internos, pero el alcance sigue siendo el de configuración HTTP/TLS observable, no un test de la lógica de la app.
 
 ## Licencia
 
