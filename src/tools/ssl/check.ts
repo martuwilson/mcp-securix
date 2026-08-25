@@ -1,4 +1,5 @@
 import * as tls from "node:tls";
+import { parseTarget } from "../target.js";
 
 export interface SslResult {
   domain: string;
@@ -22,13 +23,15 @@ export interface SslResult {
 const asString = (v: string | string[] | undefined): string | undefined =>
   Array.isArray(v) ? v[0] : v;
 
-export async function sslCheck(domain: string): Promise<SslResult> {
+export async function sslCheck(input: string): Promise<SslResult> {
+  const target = parseTarget(input);
+  const domain = target.hostPort;
   return new Promise((resolve) => {
     const socket = tls.connect(
       {
-        host: domain,
-        port: 443,
-        servername: domain,
+        host: target.tlsHost,
+        port: target.tlsPort,
+        servername: target.tlsHost,
         rejectUnauthorized: false, // queremos inspeccionar aunque sea inválido
         timeout: 8000,
       },
@@ -115,7 +118,7 @@ export async function sslCheck(domain: string): Promise<SslResult> {
         domain,
         valid: false,
         verdict: "error",
-        detail: "Timeout al conectar al servidor. Puerto 443 puede estar cerrado o filtrado.",
+        detail: `Timeout al conectar al servidor. Puerto ${target.tlsPort} puede estar cerrado o filtrado.`,
       });
     });
 

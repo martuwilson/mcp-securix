@@ -1,4 +1,5 @@
 import { httpGet } from "./fetch.js";
+import { parseTarget, type Target } from "../target.js";
 import type { Finding } from "../findings.js";
 
 // Controles web que aprovechan que ya bajamos la página:
@@ -43,10 +44,10 @@ export interface WebExtrasResult {
   findings: Finding[];
 }
 
-async function checkHttpsRedirect(domain: string): Promise<HttpsRedirectResult> {
+async function checkHttpsRedirect(target: Target): Promise<HttpsRedirectResult> {
   try {
     // maxRedirects 0: queremos ver el primer salto sin seguirlo.
-    const res = await httpGet(`http://${domain}`, { timeoutMs: 8000, maxRedirects: 0 });
+    const res = await httpGet(target.insecureUrl(), { timeoutMs: 8000, maxRedirects: 0 });
     const status = res.statusCode ?? 0;
     const location = res.headers.location;
 
@@ -91,9 +92,9 @@ export function parseCookie(raw: string): CookieInfo {
   };
 }
 
-async function checkCookies(domain: string): Promise<CookiesResult> {
+async function checkCookies(target: Target): Promise<CookiesResult> {
   try {
-    const res = await httpGet(`https://${domain}`, { timeoutMs: 8000, maxRedirects: 5 });
+    const res = await httpGet(target.primaryUrl(), { timeoutMs: 8000, maxRedirects: 5 });
     const setCookie = res.headers["set-cookie"] ?? [];
     if (setCookie.length === 0) {
       return { count: 0, cookies: [], verdict: "none", detail: "El servidor no setea cookies en la respuesta inicial." };
@@ -115,10 +116,10 @@ async function checkCookies(domain: string): Promise<CookiesResult> {
   }
 }
 
-async function checkSecurityTxt(domain: string): Promise<SecurityTxtResult> {
+async function checkSecurityTxt(target: Target): Promise<SecurityTxtResult> {
   const candidates = [
-    `https://${domain}/.well-known/security.txt`,
-    `https://${domain}/security.txt`,
+    target.primaryUrl("/.well-known/security.txt"),
+    target.primaryUrl("/security.txt"),
   ];
   for (const url of candidates) {
     try {
@@ -137,16 +138,22 @@ async function checkSecurityTxt(domain: string): Promise<SecurityTxtResult> {
   };
 }
 
-export async function webExtrasCheck(domain: string): Promise<WebExtrasResult> {
+export async function webExtrasCheck(input: string): Promise<WebExtrasResult> {
+  const target = parseTarget(input);
+  const domain = target.hostPort;
   const [httpsRedirect, cookies, securityTxt] = await Promise.all([
-    checkHttpsRedirect(domain),
-    checkCookies(domain),
-    checkSecurityTxt(domain),
+    checkHttpsRedirect(target),
+    checkCookies(target),
+    checkSecurityTxt(target),
   ]);
 
   const findings: Finding[] = [];
 
-  if (httpsRedirect.verdict === "weak") {
+  // En un target local (localhost/IP privada) varios de estos controles no
+  // aplican de verdad: un dev server rara vez redirige http→https, las cookies
+  // no pueden llevar Secure sobre http y nadie publica security.txt. Los
+  // omitimos como hallazgo para no ensuciar el reporte.
+  if (!target.isLocal && httpsRedirect.verdict === "weak") {
     findings.push({
       id: "no-https-redirect",
       category: "headers",
@@ -163,7 +170,7 @@ export async function webExtrasCheck(domain: string): Promise<WebExtrasResult> {
     const insecure = cookies.cookies.filter((c) => !c.secure);
     const noHttpOnly = cookies.cookies.filter((c) => !c.httpOnly);
     const noSameSite = cookies.cookies.filter((c) => !c.sameSite);
-    if (insecure.length > 0) {
+    if (insecure.length > 0 && !target.isLocal) {
       findings.push({
         id: "cookies-no-secure",
         category: "headers",
@@ -195,7 +202,7 @@ export async function webExtrasCheck(domain: string): Promise<WebExtrasResult> {
     }
   }
 
-  if (securityTxt.verdict === "missing") {
+  if (securityTxt.verdict === "missing" && !target.isLocal) {
     findings.push({
       id: "security-txt-missing",
       category: "headers",
@@ -204,7 +211,7 @@ export async function webExtrasCheck(domain: string): Promise<WebExtrasResult> {
       impact: securityTxt.detail,
       remediation: {
         summary: "Publicá /.well-known/security.txt con un contacto para reportes de seguridad.",
-        example: "Contact: mailto:security@" + domain + "\nExpires: 2027-01-01T00:00:00Z",
+        example: "Contact: mailto:security@" + target.host + "\nExpires: 2027-01-01T00:00:00Z",
         reference: "https://www.rfc-editor.org/rfc/rfc9116",
       },
     });

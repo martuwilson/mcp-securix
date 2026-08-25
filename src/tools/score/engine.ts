@@ -7,6 +7,7 @@ import { sslCheck, type SslResult } from "../ssl/check.js";
 import { headersCheck, type HeadersResult } from "../http/header.js";
 import { corsCheck, type CorsResult } from "../http/cors.js";
 import { webExtrasCheck, type WebExtrasResult } from "../http/web-extras.js";
+import { parseTarget } from "../target.js";
 import {
   type Finding,
   type Severity,
@@ -425,7 +426,7 @@ export function scoreHeaders(headers: HeadersResult): { points: number; detail: 
 //   score = round( sum(earned aplicables) / sum(max aplicables) * 100 )
 type ScoreDetails = SecurityScoreResult["details"];
 
-export function buildScoreItems(d: ScoreDetails, hasMx: boolean): ScoreItem[] {
+export function buildScoreItems(d: ScoreDetails, hasMx: boolean, isLocal = false): ScoreItem[] {
   const items: ScoreItem[] = [];
   const add = (
     key: string,
@@ -445,12 +446,17 @@ export function buildScoreItems(d: ScoreDetails, hasMx: boolean): ScoreItem[] {
           ? 10
           : 13
         : 0;
-  add("ssl", "Certificado SSL/TLS", "tls", sslEarned, 18);
+  // En local, un servidor http-only (verdict error) o un cert autofirmado
+  // (verdict invalid) es lo esperado en desarrollo: no penaliza el score.
+  const sslApplicable = !isLocal || d.ssl.verdict === "strong" || d.ssl.verdict === "weak";
+  add("ssl", "Certificado SSL/TLS", "tls", sslEarned, 18, sslApplicable);
 
   const redirect = d.webExtras.httpsRedirect.verdict;
-  add("https-redirect", "Redirect HTTP→HTTPS", "tls", redirect === "strong" ? 5 : 0, 5, redirect !== "error");
+  // El redirect http→https no aplica a un dev server local.
+  add("https-redirect", "Redirect HTTP→HTTPS", "tls", redirect === "strong" ? 5 : 0, 5, redirect !== "error" && !isLocal);
 
-  add("caa", "CAA", "tls", d.domainInfo.caa.verdict === "present" ? 3 : 0, 3);
+  // CAA es gobernanza de CAs públicas: no aplica a localhost.
+  add("caa", "CAA", "tls", d.domainInfo.caa.verdict === "present" ? 3 : 0, 3, !isLocal);
 
   // ---- Email (todo el grupo se excluye si el dominio no tiene MX) ----
   const dmarcPts =
@@ -510,18 +516,19 @@ export function buildScoreItems(d: ScoreDetails, hasMx: boolean): ScoreItem[] {
   const corsPts = corsV === "none" || corsV === "safe" ? 3 : corsV === "permissive" ? 2 : 0;
   add("cors", "CORS", "web", corsPts, 3, corsV !== "error");
 
-  add("security-txt", "security.txt", "web", d.webExtras.securityTxt.verdict === "present" ? 1 : 0, 1);
+  // security.txt es un canal público de reporte: no tiene sentido en localhost.
+  add("security-txt", "security.txt", "web", d.webExtras.securityTxt.verdict === "present" ? 1 : 0, 1, !isLocal);
 
-  // ---- DNS ----
+  // ---- DNS (todo el grupo depende de presencia pública: se excluye en local) ----
   const dnssec = d.domainInfo.registration.dnssec;
-  add("dnssec", "DNSSEC", "dns", dnssec ? 6 : 0, 6, dnssec != null);
+  add("dnssec", "DNSSEC", "dns", dnssec ? 6 : 0, 6, dnssec != null && !isLocal);
 
   const days = d.domainInfo.registration.daysUntilExpiry;
   const expiryPts = days == null ? 0 : days > 60 ? 3 : days > 30 ? 1 : 0;
-  add("domain-expiry", "Expiración del dominio", "dns", expiryPts, 3, days != null);
+  add("domain-expiry", "Expiración del dominio", "dns", expiryPts, 3, days != null && !isLocal);
 
   const hasIpv6 = !!(d.dns.records.AAAA && d.dns.records.AAAA.length > 0);
-  add("ipv6", "IPv6", "dns", hasIpv6 ? 2 : 0, 2);
+  add("ipv6", "IPv6", "dns", hasIpv6 ? 2 : 0, 2, !isLocal);
 
   return items;
 }
@@ -538,24 +545,72 @@ function summarizeGroup(items: ScoreItem[], group: ScoreGroup): CategoryScore {
   };
 }
 
-export async function securityScore(domain: string): Promise<SecurityScoreResult> {
-  // Resolvemos DNS primero para saber si el dominio tiene MX (correo): eso
-  // define si los controles de email avanzado aplican de verdad.
-  const dns = await dnsLookup(domain);
-  const hasMx = !!(dns.records.MX && dns.records.MX.length > 0);
+export async function securityScore(input: string): Promise<SecurityScoreResult> {
+  const target = parseTarget(input);
+  const domain = target.hostPort;
+  const isLocal = target.isLocal;
 
-  // El resto corre en paralelo.
-  const [spfDmarc, dkim, emailExtras, domainInfo, ssl, headers, cors, webExtras] =
-    await Promise.all([
-      spfDmarcCheck(domain),
-      dkimCheck(domain),
-      emailExtrasCheck(domain, hasMx),
-      domainInfoCheck(domain),
-      sslCheck(domain),
-      headersCheck(domain),
-      corsCheck(domain),
-      webExtrasCheck(domain),
+  // Los controles basados en DNS/RDAP (SPF, DMARC, DKIM, email avanzado, CAA,
+  // DNSSEC, expiración) no aplican a un target local: localhost / IP privada no
+  // tienen presencia pública en DNS ni registro. Los omitimos por completo (sin
+  // llamadas externas que filtren "localhost") y usamos resultados neutros.
+  const NA = "No aplica en un target local.";
+  let dns: DnsLookupResult = { domain, records: {} };
+  let spfDmarc: SpfDmarcResult = {
+    domain,
+    spf: { exists: false, verdict: "missing", detail: NA },
+    dmarc: { exists: false, verdict: "missing", detail: NA },
+  };
+  let dkim: DkimResult = {
+    domain, found: [], selectorsProbed: 0, verdict: "unknown", detail: NA, findings: [],
+  };
+  let emailExtras: EmailExtrasResult = {
+    domain, hasMx: false,
+    mtaSts: { exists: false, verdict: "missing", detail: NA },
+    tlsRpt: { exists: false, verdict: "missing", detail: NA },
+    bimi: { exists: false, hasVmc: false, verdict: "missing", detail: NA },
+    findings: [],
+  };
+  let domainInfo: DomainInfoResult = {
+    domain,
+    caa: { exists: false, issuers: [], verdict: "missing", detail: NA },
+    registration: { available: false, detail: NA },
+    findings: [],
+  };
+
+  if (!isLocal) {
+    // Resolvemos DNS primero para saber si el dominio tiene MX (correo): eso
+    // define si los controles de email avanzado aplican de verdad.
+    dns = await dnsLookup(input);
+  }
+  const hasMx = !isLocal && !!(dns.records.MX && dns.records.MX.length > 0);
+
+  // Los checks HTTP/SSL siempre corren contra el target (local o público).
+  let ssl: SslResult;
+  let headers: HeadersResult;
+  let cors: CorsResult;
+  let webExtras: WebExtrasResult;
+
+  if (isLocal) {
+    [ssl, headers, cors, webExtras] = await Promise.all([
+      sslCheck(input),
+      headersCheck(input),
+      corsCheck(input),
+      webExtrasCheck(input),
     ]);
+  } else {
+    [spfDmarc, dkim, emailExtras, domainInfo, ssl, headers, cors, webExtras] =
+      await Promise.all([
+        spfDmarcCheck(input),
+        dkimCheck(input),
+        emailExtrasCheck(input, hasMx),
+        domainInfoCheck(input),
+        sslCheck(input),
+        headersCheck(input),
+        corsCheck(input),
+        webExtrasCheck(input),
+      ]);
+  }
 
   const findings: Finding[] = [];
 
@@ -564,13 +619,20 @@ export async function securityScore(domain: string): Promise<SecurityScoreResult
   const dmarcScore = scoreDmarc(spfDmarc.dmarc, domain, hasMx);
   const headersScore = scoreHeaders(headers);
 
+  // En local no reportamos hallazgos de un cert "roto" (http-only/autofirmado):
+  // es lo normal en desarrollo y no debe aparecer como problema.
+  const includeSslFindings =
+    !isLocal || (ssl.verdict !== "error" && ssl.verdict !== "invalid");
+
   findings.push(
-    ...sslScore.findings,
-    ...spfScore.findings,
-    ...dmarcScore.findings,
+    ...(includeSslFindings ? sslScore.findings : []),
+    // SPF/DMARC solo aplican a dominios públicos con correo.
+    ...(isLocal ? [] : spfScore.findings),
+    ...(isLocal ? [] : dmarcScore.findings),
     ...headersScore.findings,
     // DKIM y CORS aportan sus propios findings (DKIM es informativo; CORS
-    // solo genera hallazgos cuando hay misconfiguración).
+    // solo genera hallazgos cuando hay misconfiguración). En local, dkim/email/
+    // domainInfo son neutros y no aportan findings.
     ...dkim.findings,
     ...cors.findings,
     // Controles de email avanzado (MTA-STS, TLS-RPT, BIMI): low/info, no
@@ -582,8 +644,8 @@ export async function securityScore(domain: string): Promise<SecurityScoreResult
     ...webExtras.findings
   );
 
-  // DNS: hallazgos informativos de baja severidad.
-  if (!dns.records.AAAA || dns.records.AAAA.length === 0) {
+  // DNS: hallazgos informativos de baja severidad (solo para dominios públicos).
+  if (!isLocal && (!dns.records.AAAA || dns.records.AAAA.length === 0)) {
     findings.push({
       id: "dns-no-ipv6",
       category: "dns",
@@ -606,7 +668,7 @@ export async function securityScore(domain: string): Promise<SecurityScoreResult
   // Los scoreSsl/Spf/Dmarc/Headers de arriba solo se usan para generar findings.
   // El número del score sale del modelo normalizado por control.
   const details = { dns, spfDmarc, dkim, emailExtras, domainInfo, ssl, headers, cors, webExtras };
-  const scoreItems = buildScoreItems(details, hasMx);
+  const scoreItems = buildScoreItems(details, hasMx, isLocal);
 
   const applicable = scoreItems.filter((i) => i.applicable);
   const earnedTotal = applicable.reduce((s, i) => s + i.earned, 0);

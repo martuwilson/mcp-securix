@@ -1,4 +1,5 @@
 import { httpGet } from "./fetch.js";
+import { parseTarget } from "../target.js";
 
 export interface HeadersResult {
   domain: string;
@@ -94,8 +95,10 @@ export function evaluateHeader(name: string, value: string | undefined): {
   }
 }
 
-export async function headersCheck(domain: string): Promise<HeadersResult> {
-  const url = `https://${domain}`;
+export async function headersCheck(input: string): Promise<HeadersResult> {
+  const target = parseTarget(input);
+  const domain = target.hostPort;
+  const url = target.primaryUrl();
 
   let res;
   try {

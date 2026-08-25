@@ -1,4 +1,5 @@
 import { httpGet } from "./fetch.js";
+import { parseTarget } from "../target.js";
 import type { Finding } from "../findings.js";
 
 // Origen claramente ajeno que usamos como "sonda". Si el servidor lo refleja
@@ -115,8 +116,10 @@ export function evaluateCors(
   };
 }
 
-export async function corsCheck(domain: string): Promise<CorsResult> {
-  const url = `https://${domain}`;
+export async function corsCheck(input: string): Promise<CorsResult> {
+  const target = parseTarget(input);
+  const domain = target.hostPort;
+  const url = target.primaryUrl();
 
   let res;
   try {

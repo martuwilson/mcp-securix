@@ -63,7 +63,7 @@ server.tool(
   "ssl_check",
   "Verifica el certificado SSL/TLS de un dominio: validez, fecha de expiración, emisor, protocolo y dominios cubiertos. Detecta certificados expirados, próximos a vencer, o con protocolos obsoletos.",
   {
-    domain: z.string().describe("El dominio a verificar, sin https://, por ejemplo 'example.com'"),
+    domain: z.string().describe("El objetivo a verificar. Acepta un dominio ('example.com'), o un target local / URL completa ('localhost:3000', 'https://127.0.0.1:8443'). Para local se usa el puerto indicado en vez del 443."),
   },
   async ({ domain }) => {
     const result = await sslCheck(domain);
@@ -83,7 +83,7 @@ server.tool(
   "headers_check",
   "Analiza los headers de seguridad HTTP de un dominio: HSTS, CSP, X-Frame-Options, X-Content-Type-Options, Referrer-Policy y Permissions-Policy. Detecta headers ausentes o mal configurados.",
   {
-    domain: z.string().describe("El dominio a analizar, sin https://, por ejemplo 'example.com'"),
+    domain: z.string().describe("El objetivo a analizar. Acepta un dominio ('example.com'), o un target local / URL completa ('localhost:3000', 'http://127.0.0.1:8080'). Se respeta el esquema y puerto si se indican."),
   },
   async ({ domain }) => {
     const result = await headersCheck(domain);
@@ -165,7 +165,7 @@ server.tool(
   "cors_check",
   "Analiza la configuración CORS enviando un Origin de prueba ajeno. Detecta misconfiguraciones peligrosas (reflejar cualquier origen con credenciales) que permiten robo de datos autenticados cross-origin.",
   {
-    domain: z.string().describe("El dominio a analizar, sin https://, por ejemplo 'example.com'"),
+    domain: z.string().describe("El objetivo a analizar. Acepta un dominio ('example.com'), o un target local / URL completa ('localhost:3000', 'http://127.0.0.1:8080'). Se respeta el esquema y puerto si se indican."),
   },
   async ({ domain }) => {
     const result = await corsCheck(domain);
@@ -185,7 +185,7 @@ server.tool(
   "web_extras_check",
   "Analiza controles web adicionales: redirect HTTP→HTTPS, flags de seguridad de cookies (Secure, HttpOnly, SameSite) y presencia de security.txt (RFC 9116).",
   {
-    domain: z.string().describe("El dominio a analizar, sin https://, por ejemplo 'example.com'"),
+    domain: z.string().describe("El objetivo a analizar. Acepta un dominio ('example.com'), o un target local / URL completa ('localhost:3000', 'http://127.0.0.1:8080'). Se respeta el esquema y puerto si se indican."),
   },
   async ({ domain }) => {
     const result = await webExtrasCheck(domain);
@@ -205,7 +205,7 @@ server.tool(
   "security_score",
   "Realiza una auditoría de seguridad completa de un dominio: DNS, SSL, SPF, DMARC y HTTP headers. Devuelve un score 0-100, nivel de riesgo, desglose por categoría y hallazgos priorizados por severidad.",
   {
-    domain: z.string().describe("El dominio a auditar, sin https://, por ejemplo 'example.com'"),
+    domain: z.string().describe("El objetivo a auditar. Acepta un dominio ('example.com'), o un target local / URL completa ('localhost:3000', 'http://127.0.0.1:8080'). En targets locales, los controles de DNS/email (SPF, DMARC, DKIM, CAA, DNSSEC) no aplican y se excluyen del score."),
   },
   async ({ domain }) => {
     const result = await securityScore(domain);
@@ -227,7 +227,7 @@ server.tool(
   "security_report",
   "Audita un dominio y devuelve un reporte de seguridad completo ya renderizado como HTML (score visual, desglose por categoría, estado de controles y hallazgos priorizados). El HTML debe mostrarse tal cual como artifact, sin modificarlo.",
   {
-    domain: z.string().describe("El dominio a auditar, sin https://, por ejemplo 'example.com'"),
+    domain: z.string().describe("El objetivo a auditar. Acepta un dominio ('example.com'), o un target local / URL completa ('localhost:3000', 'http://127.0.0.1:8080'). En targets locales, los controles de DNS/email (SPF, DMARC, DKIM, CAA, DNSSEC) no aplican y se excluyen del score."),
   },
   async ({ domain }) => {
     const result = await securityScore(domain);
@@ -249,7 +249,7 @@ server.prompt(
   "audit_report",
   "Audita un dominio con security_score y presenta un informe de seguridad claro, priorizado y accionable en español.",
   {
-    domain: z.string().describe("El dominio a auditar, sin https://, por ejemplo 'example.com'"),
+    domain: z.string().describe("El objetivo a auditar. Acepta un dominio ('example.com'), o un target local / URL completa ('localhost:3000', 'http://127.0.0.1:8080'). En targets locales, los controles de DNS/email (SPF, DMARC, DKIM, CAA, DNSSEC) no aplican y se excluyen del score."),
   },
   ({ domain }) => ({
     messages: [
